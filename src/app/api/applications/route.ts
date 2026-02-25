@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
     .eq('document_type_id', body.document_type_id)
     .eq('is_default', true)
     .eq('is_active', true)
-    .single()
+    .maybeSingle()
 
   if (!routeTemplate) {
     return NextResponse.json({ error: 'No approval route configured' }, { status: 400 })

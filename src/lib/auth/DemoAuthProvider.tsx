@@ -15,7 +15,7 @@ export function DemoAuthProvider({ children }: { children: ReactNode }) {
       .from('employees')
       .select('*')
       .eq('id', employeeId)
-      .single()
+      .maybeSingle()
 
     if (!employee) {
       setCurrentUser(null)
@@ -33,7 +33,7 @@ export function DemoAuthProvider({ children }: { children: ReactNode }) {
       .eq('employee_id', employeeId)
       .eq('is_primary', true)
       .eq('is_active', true)
-      .single()
+      .maybeSingle()
 
     setCurrentUser({
       ...employee,
@@ -53,7 +53,7 @@ export function DemoAuthProvider({ children }: { children: ReactNode }) {
         .from('employees')
         .select('id')
         .eq('email', 'tanaka@tsukamoto-demo.com')
-        .single()
+        .maybeSingle()
         .then(({ data }) => {
           if (data) {
             setStoredUserId(data.id)

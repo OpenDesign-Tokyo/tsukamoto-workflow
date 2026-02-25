@@ -44,7 +44,7 @@ export default function NewApplicationFormPage() {
         .from('document_types')
         .select('*')
         .eq('id', typeId)
-        .single()
+        .maybeSingle()
 
       if (dt) {
         setDocType(dt)
@@ -53,7 +53,7 @@ export default function NewApplicationFormPage() {
           .select('*')
           .eq('document_type_id', dt.id)
           .eq('is_current', true)
-          .single()
+          .maybeSingle()
 
         if (tmpl) {
           setTemplate(tmpl)

@@ -22,7 +22,7 @@ export async function GET(
       )
     `)
     .eq('id', id)
-    .single()
+    .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -53,7 +53,7 @@ export async function PUT(
     .from('applications')
     .select('id, status, applicant_id')
     .eq('id', id)
-    .single()
+    .maybeSingle()
 
   if (!app) {
     return NextResponse.json({ error: 'Application not found' }, { status: 404 })

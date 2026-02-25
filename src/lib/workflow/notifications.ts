@@ -30,7 +30,7 @@ export async function sendWorkflowNotification(params: NotificationParams) {
     .from('employees')
     .select('email')
     .eq('id', params.recipientId)
-    .single()
+    .maybeSingle()
 
   if (recipient) {
     await sendTeamsNotification(recipient.email, {

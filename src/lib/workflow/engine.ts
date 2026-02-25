@@ -19,7 +19,7 @@ export async function submitApplication(applicationId: string): Promise<Workflow
     .from('applications')
     .select('*, applicant:employees!applicant_id(*)')
     .eq('id', applicationId)
-    .single()
+    .maybeSingle()
 
   if (appError || !application) {
     return { success: false, applicationId, applicationNumber: '', error: 'Application not found' }
@@ -43,7 +43,7 @@ export async function submitApplication(applicationId: string): Promise<Workflow
     .eq('employee_id', application.applicant_id)
     .eq('is_primary', true)
     .eq('is_active', true)
-    .single()
+    .maybeSingle()
 
   if (!assignment) {
     return { success: false, applicationId, applicationNumber: application.application_number, error: 'Applicant has no department' }
@@ -124,7 +124,7 @@ export async function approveApplication(
     .from('applications')
     .select('*, applicant:employees!applicant_id(*)')
     .eq('id', applicationId)
-    .single()
+    .maybeSingle()
 
   if (!application) {
     return { success: false, isCompleted: false, error: 'Application not found' }
@@ -176,7 +176,7 @@ export async function approveApplication(
     .select('*')
     .eq('route_template_id', application.route_template_id)
     .eq('step_order', nextStepOrder)
-    .single()
+    .maybeSingle()
 
   if (!nextStep) {
     return { success: false, isCompleted: false, error: 'Next step not found' }
@@ -189,7 +189,7 @@ export async function approveApplication(
     .eq('employee_id', application.applicant_id)
     .eq('is_primary', true)
     .eq('is_active', true)
-    .single()
+    .maybeSingle()
 
   if (!assignment) {
     return { success: false, isCompleted: false, error: 'Applicant department not found' }
@@ -261,7 +261,7 @@ export async function rejectApplication(
     .from('applications')
     .select('*, applicant:employees!applicant_id(*)')
     .eq('id', applicationId)
-    .single()
+    .maybeSingle()
 
   if (!application) {
     return { success: false, error: 'Application not found' }

@@ -32,7 +32,7 @@ export async function resolveApprover(
         .eq('position_id', step.assignee_position_id!)
         .eq('is_active', true)
         .neq('employee_id', applicantId)
-        .single()
+        .maybeSingle()
 
       if (!data?.employee) return null
       const emp = data.employee as unknown as { id: string; name: string }
@@ -53,7 +53,7 @@ export async function resolveApprover(
         .from('departments')
         .select('parent_id')
         .eq('id', applicantDepartmentId)
-        .single()
+        .maybeSingle()
 
       if (!dept?.parent_id) {
         // If no parent, search in same department
@@ -78,7 +78,7 @@ export async function resolveApprover(
           .eq('position_id', step.assignee_position_id!)
           .eq('is_active', true)
           .neq('employee_id', applicantId)
-          .single()
+          .maybeSingle()
 
         if (data?.employee) {
           const emp = data.employee as unknown as { id: string; name: string }
@@ -98,7 +98,7 @@ export async function resolveApprover(
           .from('departments')
           .select('parent_id')
           .eq('id', searchDeptId)
-          .single()
+          .maybeSingle()
 
         searchDeptId = parentDept?.parent_id || null
       }
@@ -111,7 +111,7 @@ export async function resolveApprover(
         .from('employees')
         .select('id, name')
         .eq('id', step.assignee_employee_id!)
-        .single()
+        .maybeSingle()
 
       if (!data) return null
 
@@ -124,7 +124,7 @@ export async function resolveApprover(
         .eq('employee_id', data.id)
         .eq('is_primary', true)
         .eq('is_active', true)
-        .single()
+        .maybeSingle()
 
       const pos = assignment?.position as unknown as { name: string } | null
       const dept = assignment?.department as unknown as { name: string } | null
@@ -172,7 +172,7 @@ export async function resolveApprover(
         .eq('employee_id', applicantId)
         .eq('department_id', applicantDepartmentId)
         .eq('is_active', true)
-        .single()
+        .maybeSingle()
 
       const applicantRank = (applicantAssignment?.position as unknown as { rank: number })?.rank || 0
 

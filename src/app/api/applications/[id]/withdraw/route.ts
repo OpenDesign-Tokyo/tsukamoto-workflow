@@ -19,7 +19,7 @@ export async function POST(
     .from('applications')
     .select('*, applicant:employees!applicant_id(*)')
     .eq('id', id)
-    .single()
+    .maybeSingle()
 
   if (!app) {
     return NextResponse.json({ error: 'Application not found' }, { status: 404 })
