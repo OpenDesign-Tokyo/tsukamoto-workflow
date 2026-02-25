@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { getDemoUserHeader } from '@/lib/auth/demo-auth'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,7 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ChevronRight, ChevronDown, Building2, User, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, User, Users, ZoomIn, ZoomOut, Maximize2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Department, Employee, EmployeeAssignment, Position } from '@/lib/types/database'
 
@@ -36,17 +36,24 @@ interface DeptNode extends Department {
   members: (EmployeeAssignment & { employee: Employee; position: Position })[]
 }
 
+// ============================================================================
+// MAIN PAGE
+// ============================================================================
+
 export default function OrgPage() {
   const [tree, setTree] = useState<DeptNode[]>([])
   const [allDepts, setAllDepts] = useState<Department[]>([])
   const [selectedDept, setSelectedDept] = useState<DeptNode | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [zoom, setZoom] = useState(1)
 
   // Dialog state
   const [showDeptDialog, setShowDeptDialog] = useState(false)
   const [editingDept, setEditingDept] = useState<Department | null>(null)
   const [deptForm, setDeptForm] = useState({ name: '', code: '', parent_id: '', level: 0, sort_order: 0 })
   const [deleteTarget, setDeleteTarget] = useState<Department | null>(null)
+
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const fetchOrg = useCallback(async () => {
     const supabase = createClient()
@@ -84,7 +91,6 @@ export default function OrgPage() {
 
     setTree(roots)
     if (!selectedDept && roots.length > 0) setSelectedDept(roots[0])
-    // Update selectedDept if it still exists
     if (selectedDept) {
       const updated = nodeMap.get(selectedDept.id)
       if (updated) setSelectedDept(updated)
@@ -166,85 +172,118 @@ export default function OrgPage() {
     }
   }
 
+  const resetZoom = () => {
+    setZoom(1)
+    if (containerRef.current) {
+      containerRef.current.scrollLeft = 0
+      containerRef.current.scrollTop = 0
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-8 w-48" />
-        <div className="grid grid-cols-2 gap-6">
-          <Skeleton className="h-96" />
-          <Skeleton className="h-96" />
-        </div>
+        <Skeleton className="h-[600px]" />
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">組織図管理</h1>
-        <Button size="sm" onClick={() => openAddDept()}>
-          <Plus className="w-4 h-4 mr-1" />
-          部署追加
-        </Button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-white border rounded-lg px-1">
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setZoom(z => Math.max(0.4, z - 0.1))}>
+              <ZoomOut className="w-3.5 h-3.5" />
+            </Button>
+            <span className="text-xs text-gray-500 w-10 text-center">{Math.round(zoom * 100)}%</span>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setZoom(z => Math.min(1.5, z + 0.1))}>
+              <ZoomIn className="w-3.5 h-3.5" />
+            </Button>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={resetZoom}>
+              <Maximize2 className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+          <Button size="sm" onClick={() => openAddDept()}>
+            <Plus className="w-4 h-4 mr-1" />
+            部署追加
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">部署ツリー</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {tree.map(node => (
-              <DeptTreeNode
-                key={node.id}
-                node={node}
+      {/* Org Chart Canvas */}
+      <Card className="overflow-hidden">
+        <div
+          ref={containerRef}
+          className="overflow-auto bg-gradient-to-br from-slate-50 to-blue-50/30"
+          style={{ minHeight: '500px', maxHeight: 'calc(100vh - 280px)' }}
+        >
+          <div
+            className="p-8 min-w-fit"
+            style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+          >
+            {tree.map(root => (
+              <OrgChartNode
+                key={root.id}
+                node={root}
                 selectedId={selectedDept?.id}
                 onSelect={setSelectedDept}
                 onEdit={openEditDept}
                 onAddChild={(id) => openAddDept(id)}
                 onDelete={setDeleteTarget}
-                level={0}
+                isRoot
               />
             ))}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+      </Card>
 
+      {/* Selected Department Detail Panel */}
+      {selectedDept && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              {selectedDept ? selectedDept.name : '部署を選択'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {selectedDept ? (
-              selectedDept.members.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">メンバーがいません</p>
-              ) : (
-                <div className="space-y-3">
-                  {selectedDept.members
-                    .sort((a, b) => (b.position?.rank || 0) - (a.position?.rank || 0))
-                    .map((m) => (
-                    <div key={m.id} className="flex items-center gap-3 p-3 rounded-lg border">
-                      <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center">
-                        <User className="w-5 h-5 text-gray-400" />
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold text-sm">{selectedDept.name}</h3>
+                {selectedDept.code && (
+                  <Badge variant="secondary" className="text-xs font-mono">{selectedDept.code}</Badge>
+                )}
+                <Badge variant="outline" className="text-xs">{selectedDept.members.length}名</Badge>
+              </div>
+              <div className="flex gap-1">
+                <Button variant="ghost" size="sm" onClick={() => openEditDept(selectedDept)}>
+                  <Pencil className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => openAddDept(selectedDept.id)}>
+                  <Plus className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
+            {selectedDept.members.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-4">メンバーがいません</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                {selectedDept.members
+                  .sort((a, b) => (b.position?.rank || 0) - (a.position?.rank || 0))
+                  .map((m) => (
+                    <div key={m.id} className="flex items-center gap-2.5 p-2.5 rounded-lg border bg-white">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center shrink-0">
+                        <User className="w-4 h-4 text-blue-400" />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm">{m.employee?.name}</p>
-                        <p className="text-xs text-gray-500">{m.employee?.email}</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm truncate">{m.employee?.name}</p>
+                        <p className="text-[10px] text-gray-400 truncate">{m.position?.name}</p>
                       </div>
-                      <Badge variant="secondary" className="text-xs">
-                        {m.position?.name}
-                      </Badge>
                     </div>
                   ))}
-                </div>
-              )
-            ) : (
-              <p className="text-sm text-gray-500 text-center py-8">左の部署ツリーから選択してください</p>
+              </div>
             )}
           </CardContent>
         </Card>
-      </div>
+      )}
 
       {/* Add/Edit Department Dialog */}
       <Dialog open={showDeptDialog} onOpenChange={setShowDeptDialog}>
@@ -307,14 +346,18 @@ export default function OrgPage() {
   )
 }
 
-function DeptTreeNode({
+// ============================================================================
+// ORG CHART NODE - Graphical card-based tree node
+// ============================================================================
+
+function OrgChartNode({
   node,
   selectedId,
   onSelect,
   onEdit,
   onAddChild,
   onDelete,
-  level,
+  isRoot,
 }: {
   node: DeptNode
   selectedId?: string
@@ -322,68 +365,115 @@ function DeptTreeNode({
   onEdit: (dept: Department) => void
   onAddChild: (parentId: string) => void
   onDelete: (dept: Department) => void
-  level: number
+  isRoot?: boolean
 }) {
-  const [expanded, setExpanded] = useState(level < 2)
   const [hover, setHover] = useState(false)
-  const hasChildren = node.children.length > 0
   const isSelected = selectedId === node.id
+  const hasChildren = node.children.length > 0
+  const memberCount = node.members.length
+
+  // Color scheme based on hierarchy level
+  const levelColors = [
+    { bg: 'bg-blue-600', text: 'text-white', border: 'border-blue-600', hoverBg: 'hover:bg-blue-700' },
+    { bg: 'bg-blue-500', text: 'text-white', border: 'border-blue-500', hoverBg: 'hover:bg-blue-600' },
+    { bg: 'bg-white', text: 'text-gray-800', border: 'border-blue-300', hoverBg: 'hover:bg-blue-50' },
+    { bg: 'bg-white', text: 'text-gray-700', border: 'border-gray-300', hoverBg: 'hover:bg-gray-50' },
+  ]
+  const colors = levelColors[Math.min(node.level, levelColors.length - 1)]
 
   return (
-    <div>
+    <div className="flex flex-col items-center">
+      {/* Node Card */}
       <div
-        className={`flex items-center gap-1 w-full px-2 py-1.5 text-sm rounded-md transition-colors ${
-          isSelected ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-100'
-        }`}
-        style={{ paddingLeft: `${level * 16 + 8}px` }}
+        className="relative group"
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
       >
         <button
-          onClick={() => {
-            onSelect(node)
-            if (hasChildren) setExpanded(!expanded)
-          }}
-          className="flex items-center gap-2 flex-1 min-w-0"
+          onClick={() => onSelect(node)}
+          className={`
+            relative px-5 py-3 rounded-lg border-2 transition-all duration-150 cursor-pointer
+            min-w-[140px] max-w-[220px] text-center shadow-sm
+            ${colors.bg} ${colors.text} ${colors.border} ${colors.hoverBg}
+            ${isSelected ? 'ring-2 ring-blue-400 ring-offset-2 shadow-md' : ''}
+          `}
         >
-          {hasChildren ? (
-            expanded ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />
-          ) : (
-            <span className="w-4" />
+          <p className="font-bold text-sm leading-tight truncate">{node.name}</p>
+          {memberCount > 0 && (
+            <div className={`flex items-center justify-center gap-1 mt-1 text-xs ${node.level < 2 ? 'text-blue-100' : 'text-gray-400'}`}>
+              <Users className="w-3 h-3" />
+              <span>{memberCount}名</span>
+            </div>
           )}
-          <Building2 className="w-4 h-4 shrink-0 text-gray-400" />
-          <span className="truncate">{node.name}</span>
-          <span className="text-xs text-gray-400 ml-auto mr-1">{node.members.length}</span>
         </button>
+
+        {/* Hover action buttons */}
         {hover && (
-          <div className="flex gap-0.5 shrink-0">
-            <button onClick={() => onAddChild(node.id)} className="p-1 rounded hover:bg-gray-200" title="子部署追加">
+          <div className="absolute -top-2 -right-2 flex gap-0.5 z-10">
+            <button
+              onClick={(e) => { e.stopPropagation(); onAddChild(node.id) }}
+              className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center shadow-md hover:bg-green-600 transition-colors"
+              title="子部署追加"
+            >
               <Plus className="w-3 h-3" />
             </button>
-            <button onClick={() => onEdit(node)} className="p-1 rounded hover:bg-gray-200" title="編集">
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(node) }}
+              className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-md hover:bg-blue-600 transition-colors"
+              title="編集"
+            >
               <Pencil className="w-3 h-3" />
             </button>
-            <button onClick={() => onDelete(node)} className="p-1 rounded hover:bg-red-100 text-red-500" title="削除">
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(node) }}
+              className="w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center shadow-md hover:bg-red-600 transition-colors"
+              title="削除"
+            >
               <Trash2 className="w-3 h-3" />
             </button>
           </div>
         )}
       </div>
-      {expanded && hasChildren && (
-        <div>
-          {node.children.map(child => (
-            <DeptTreeNode
-              key={child.id}
-              node={child}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onEdit={onEdit}
-              onAddChild={onAddChild}
-              onDelete={onDelete}
-              level={level + 1}
-            />
-          ))}
-        </div>
+
+      {/* Connector lines + Children */}
+      {hasChildren && (
+        <>
+          {/* Vertical line down from parent */}
+          <div className="w-px h-6 bg-blue-300" />
+
+          {/* Horizontal connector bar */}
+          {node.children.length > 1 && (
+            <div className="relative w-full flex justify-center">
+              <div
+                className="h-px bg-blue-300 absolute top-0"
+                style={{
+                  left: `calc(50% - ${(node.children.length - 1) * 50}%)`,
+                  right: `calc(50% - ${(node.children.length - 1) * 50}%)`,
+                  minWidth: `${(node.children.length - 1) * 180}px`,
+                  maxWidth: '100%',
+                }}
+              />
+            </div>
+          )}
+
+          {/* Children row */}
+          <div className="flex gap-6 items-start">
+            {node.children.map((child, i) => (
+              <div key={child.id} className="flex flex-col items-center">
+                {/* Vertical line from horizontal bar to child */}
+                <div className="w-px h-6 bg-blue-300" />
+                <OrgChartNode
+                  node={child}
+                  selectedId={selectedId}
+                  onSelect={onSelect}
+                  onEdit={onEdit}
+                  onAddChild={onAddChild}
+                  onDelete={onDelete}
+                />
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   )

@@ -10,7 +10,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, Trash2, Users } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Plus, Trash2, Users, Pencil, Infinity } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils/format'
 import type { Employee } from '@/lib/types/database'
@@ -28,11 +39,20 @@ interface ProxySettingWithDetails {
   proxy: { id: string; name: string; email: string }
 }
 
+const UNLIMITED_DATE = '2099-12-31'
+
+function isUnlimited(date: string): boolean {
+  return date >= '2099-01-01'
+}
+
 export default function ProxyManagementPage() {
   const [settings, setSettings] = useState<ProxySettingWithDetails[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<ProxySettingWithDetails | null>(null)
+  const [isNoLimit, setIsNoLimit] = useState(false)
   const [formData, setFormData] = useState({
     principal_id: '',
     proxy_id: '',
@@ -60,8 +80,40 @@ export default function ProxyManagementPage() {
     fetchEmployees()
   }, [fetchSettings])
 
-  const handleCreate = async () => {
-    if (!formData.principal_id || !formData.proxy_id || !formData.valid_from || !formData.valid_until) {
+  const resetForm = () => {
+    setFormData({
+      principal_id: '',
+      proxy_id: '',
+      valid_from: new Date().toISOString().split('T')[0],
+      valid_until: '',
+    })
+    setIsNoLimit(false)
+    setEditingId(null)
+    setShowForm(false)
+  }
+
+  const openAddForm = () => {
+    resetForm()
+    setShowForm(true)
+  }
+
+  const openEditForm = (s: ProxySettingWithDetails) => {
+    setEditingId(s.id)
+    const unlimited = isUnlimited(s.valid_until)
+    setIsNoLimit(unlimited)
+    setFormData({
+      principal_id: s.principal_id,
+      proxy_id: s.proxy_id,
+      valid_from: s.valid_from.split('T')[0],
+      valid_until: unlimited ? '' : s.valid_until.split('T')[0],
+    })
+    setShowForm(true)
+  }
+
+  const handleSave = async () => {
+    const validUntil = isNoLimit ? UNLIMITED_DATE : formData.valid_until
+
+    if (!formData.principal_id || !formData.proxy_id || !formData.valid_from || !validUntil) {
       toast.error('全ての項目を入力してください')
       return
     }
@@ -70,28 +122,52 @@ export default function ProxyManagementPage() {
       return
     }
 
-    const res = await fetch('/api/admin/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
-      body: JSON.stringify(formData),
-    })
+    const payload = { ...formData, valid_until: validUntil }
 
-    if (res.ok) {
-      toast.success('代理設定を追加しました')
-      setShowForm(false)
-      setFormData({ principal_id: '', proxy_id: '', valid_from: new Date().toISOString().split('T')[0], valid_until: '' })
-      fetchSettings()
+    if (editingId) {
+      const res = await fetch(`/api/admin/proxy/${editingId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+        body: JSON.stringify(payload),
+      })
+      if (res.ok) {
+        toast.success('代理設定を更新しました')
+        resetForm()
+        fetchSettings()
+      } else {
+        const data = await res.json()
+        toast.error(data.error || '更新に失敗しました')
+      }
     } else {
-      const data = await res.json()
-      toast.error(data.error || '追加に失敗しました')
+      const res = await fetch('/api/admin/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+        body: JSON.stringify(payload),
+      })
+      if (res.ok) {
+        toast.success('代理設定を追加しました')
+        resetForm()
+        fetchSettings()
+      } else {
+        const data = await res.json()
+        toast.error(data.error || '追加に失敗しました')
+      }
     }
   }
 
-  const handleDelete = async (id: string) => {
-    const supabase = createClient()
-    await supabase.from('proxy_settings').update({ is_active: false }).eq('id', id)
-    toast.success('代理設定を無効化しました')
-    fetchSettings()
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    const res = await fetch(`/api/admin/proxy/${deleteTarget.id}`, {
+      method: 'DELETE',
+      headers: getDemoUserHeader(),
+    })
+    if (res.ok) {
+      toast.success('代理設定を無効化しました')
+      setDeleteTarget(null)
+      fetchSettings()
+    } else {
+      toast.error('無効化に失敗しました')
+    }
   }
 
   if (isLoading) {
@@ -109,7 +185,7 @@ export default function ProxyManagementPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">代理承認管理</h1>
-        <Button onClick={() => setShowForm(!showForm)}>
+        <Button onClick={openAddForm}>
           <Plus className="w-4 h-4 mr-2" />
           代理設定追加
         </Button>
@@ -118,7 +194,9 @@ export default function ProxyManagementPage() {
       {showForm && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">新規代理設定</CardTitle>
+            <CardTitle className="text-base">
+              {editingId ? '代理設定の編集' : '新規代理設定'}
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -153,17 +231,39 @@ export default function ProxyManagementPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>終了日</Label>
-                <Input
-                  type="date"
-                  value={formData.valid_until}
-                  onChange={e => setFormData(p => ({ ...p, valid_until: e.target.value }))}
-                />
+                <div className="flex items-center justify-between">
+                  <Label>終了日</Label>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="no-limit-toggle" className="text-xs text-gray-500 font-normal cursor-pointer">
+                      無期限
+                    </Label>
+                    <Switch
+                      id="no-limit-toggle"
+                      checked={isNoLimit}
+                      onCheckedChange={(checked) => {
+                        setIsNoLimit(checked)
+                        if (checked) setFormData(p => ({ ...p, valid_until: '' }))
+                      }}
+                    />
+                  </div>
+                </div>
+                {isNoLimit ? (
+                  <div className="flex items-center gap-2 h-9 px-3 bg-gray-50 border rounded-md text-sm text-gray-500">
+                    <Infinity className="w-4 h-4" />
+                    無期限
+                  </div>
+                ) : (
+                  <Input
+                    type="date"
+                    value={formData.valid_until}
+                    onChange={e => setFormData(p => ({ ...p, valid_until: e.target.value }))}
+                  />
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowForm(false)}>キャンセル</Button>
-              <Button onClick={handleCreate}>追加</Button>
+              <Button variant="outline" onClick={resetForm}>キャンセル</Button>
+              <Button onClick={handleSave}>{editingId ? '更新' : '追加'}</Button>
             </div>
           </CardContent>
         </Card>
@@ -179,7 +279,8 @@ export default function ProxyManagementPage() {
           ) : (
             <div className="divide-y">
               {settings.map((s) => {
-                const isExpired = s.valid_until < now
+                const unlimited = isUnlimited(s.valid_until)
+                const isExpired = !unlimited && s.valid_until < now
                 const isActive = s.is_active && !isExpired
                 return (
                   <div key={s.id} className="flex items-center justify-between p-4">
@@ -197,19 +298,36 @@ export default function ProxyManagementPage() {
                         )}
                       </div>
                       <p className="text-xs text-gray-500">
-                        {formatDate(s.valid_from)} 〜 {formatDate(s.valid_until)}
+                        {formatDate(s.valid_from)} 〜{' '}
+                        {unlimited ? (
+                          <span className="inline-flex items-center gap-0.5">
+                            <Infinity className="w-3 h-3 inline" /> 無期限
+                          </span>
+                        ) : (
+                          formatDate(s.valid_until)
+                        )}
                       </p>
                     </div>
-                    {isActive && (
+                    <div className="flex gap-1">
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDelete(s.id)}
-                        className="text-gray-400 hover:text-red-600"
+                        onClick={() => openEditForm(s)}
+                        className="text-gray-400 hover:text-blue-600"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Pencil className="w-4 h-4" />
                       </Button>
-                    )}
+                      {s.is_active && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDeleteTarget(s)}
+                          className="text-gray-400 hover:text-red-600"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 )
               })}
@@ -217,6 +335,24 @@ export default function ProxyManagementPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>代理設定の無効化</AlertDialogTitle>
+            <AlertDialogDescription>
+              「{deleteTarget?.principal?.name} → {deleteTarget?.proxy?.name}」の代理設定を無効化しますか？
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
+              無効化
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

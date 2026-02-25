@@ -23,7 +23,8 @@ export async function exportApplicationPdf(
   schema: FormSchema
 ) {
   const { jsPDF } = await import('jspdf')
-  await import('jspdf-autotable')
+  const autoTableModule = await import('jspdf-autotable')
+  const autoTable = autoTableModule.default
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
 
@@ -82,8 +83,7 @@ export async function exportApplicationPdf(
           })
         )
 
-        // @ts-expect-error autoTable added by jspdf-autotable
-        doc.autoTable({
+        autoTable(doc, {
           startY: y,
           head: [tableHead],
           body: tableBody,
@@ -91,7 +91,7 @@ export async function exportApplicationPdf(
           styles: { fontSize: 8 },
           headStyles: { fillColor: [30, 58, 95] },
         })
-        // @ts-expect-error autoTable sets lastAutoTable
+        // @ts-expect-error lastAutoTable set by jspdf-autotable
         y = doc.lastAutoTable.finalY + 5
       }
     } else {
@@ -134,8 +134,7 @@ export async function exportApplicationPdf(
       r.acted_at || '-',
     ])
 
-    // @ts-expect-error autoTable
-    doc.autoTable({
+    autoTable(doc, {
       startY: y,
       head: [approvalHead],
       body: approvalBody,

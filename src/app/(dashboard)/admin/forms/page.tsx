@@ -13,7 +13,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Pencil, Eye, EyeOff, Upload } from 'lucide-react'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Pencil, Eye, EyeOff, Upload, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils/format'
 import { FormRenderer } from '@/components/forms/FormRenderer'
@@ -83,6 +93,28 @@ export default function FormsPage() {
   const handleExcelImport = (schema: FormSchema) => {
     setImportedSchema(schema)
     setShowImportDialog(false)
+  }
+
+  const [deleteTarget, setDeleteTarget] = useState<FormTemplateRow | null>(null)
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return
+    try {
+      const res = await fetch(`/api/admin/templates/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers: getDemoUserHeader(),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.error || '削除に失敗しました')
+        return
+      }
+      toast.success('テンプレートを削除しました')
+      setDeleteTarget(null)
+      await fetchData()
+    } catch {
+      toast.error('エラーが発生しました')
+    }
   }
 
   const previewTemplate = templates.find(t => t.id === previewId)
@@ -191,6 +223,14 @@ export default function FormsPage() {
                         <Button variant="ghost" size="sm" onClick={() => setEditTemplate(t)}>
                           <Pencil className="w-3 h-3" />
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDeleteTarget(t)}
+                          className="text-gray-400 hover:text-red-600"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -226,6 +266,25 @@ export default function FormsPage() {
           <ExcelTemplateImporter onImport={handleExcelImport} />
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>テンプレートの削除</AlertDialogTitle>
+            <AlertDialogDescription>
+              「{deleteTarget?.document_type?.name} v{deleteTarget?.version}」を削除しますか？
+              申請で使用されている場合は削除できません。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>キャンセル</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
+              削除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

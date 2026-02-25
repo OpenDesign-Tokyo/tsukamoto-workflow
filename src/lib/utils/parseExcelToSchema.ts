@@ -216,7 +216,22 @@ export function parseStructuredExcel(workbook: { SheetNames: string[]; Sheets: R
 
 // ---- Auto-detect format (single sheet) ----
 
-function inferFieldType(values: unknown[]): FormField['type'] {
+// ラベルに日付関連のキーワードが含まれる場合に日付型と推定
+const DATE_LABEL_HINTS = [
+  '日付', '日時', '年月日', '期日', '期限', '開始日', '終了日', '申請日',
+  '出発日', '帰着日', '出張日', '納品日', '検収日', '発注日', '希望日',
+  '予定日', '実施日', '完了日', '入社日', '退社日', '生年月日', '配属日',
+]
+
+function inferFieldType(values: unknown[], label?: string): FormField['type'] {
+  // ラベルベースのヒント判定
+  if (label) {
+    const l = label.trim()
+    if (DATE_LABEL_HINTS.some(h => l.includes(h)) || /日$/.test(l)) {
+      return 'date'
+    }
+  }
+
   const nonEmpty = values.filter(v => v != null && v !== '')
   if (nonEmpty.length === 0) return 'text'
 
@@ -281,7 +296,7 @@ export function parseAutoDetectExcel(workbook: { SheetNames: string[]; Sheets: R
     usedIds.add(fieldId)
 
     const columnValues = dataRows.map(r => (r as unknown[])[c])
-    const fieldType = inferFieldType(columnValues)
+    const fieldType = inferFieldType(columnValues, label)
 
     const field: FormField = { id: fieldId, type: fieldType, label }
 

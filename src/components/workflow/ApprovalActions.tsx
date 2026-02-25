@@ -29,25 +29,47 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
   const [showApproveDialog, setShowApproveDialog] = useState(false)
   const [showRejectDialog, setShowRejectDialog] = useState(false)
 
+  const isProcessing = isApproving || isRejecting
+
   const handleApprove = async () => {
     setIsApproving(true)
+    setShowApproveDialog(false)
     try {
       await onApprove(comment || undefined)
     } finally {
       setIsApproving(false)
-      setShowApproveDialog(false)
     }
   }
 
   const handleReject = async () => {
     if (!comment.trim()) return
     setIsRejecting(true)
+    setShowRejectDialog(false)
     try {
       await onReject(comment)
     } finally {
       setIsRejecting(false)
-      setShowRejectDialog(false)
     }
+  }
+
+  if (isProcessing) {
+    return (
+      <div className="p-6 bg-blue-50 rounded-lg border border-blue-200">
+        <div className="flex flex-col items-center gap-3 py-4">
+          <div className="relative">
+            <div className="w-10 h-10 rounded-full border-3 border-blue-200 border-t-blue-600 animate-spin" />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="text-sm font-semibold text-blue-900">
+              {isApproving ? '承認処理中...' : '差戻し処理中...'}
+            </p>
+            <p className="text-xs text-blue-600">
+              現在処理を実行しています。そのままお待ちください。
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -65,7 +87,7 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
         <Button
           onClick={() => setShowApproveDialog(true)}
           className="bg-green-600 hover:bg-green-700 flex-1"
-          disabled={disabled || isApproving || isRejecting}
+          disabled={disabled}
         >
           <Check className="w-4 h-4 mr-2" />
           承認する
@@ -80,7 +102,7 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
             setShowRejectDialog(true)
           }}
           className="flex-1"
-          disabled={disabled || isApproving || isRejecting}
+          disabled={disabled}
         >
           <X className="w-4 h-4 mr-2" />
           差戻す
@@ -97,8 +119,7 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleApprove} disabled={isApproving}>
-              {isApproving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            <AlertDialogAction onClick={handleApprove}>
               承認する
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -117,10 +138,8 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleReject}
-              disabled={isRejecting}
               className="bg-red-600 hover:bg-red-700"
             >
-              {isRejecting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               差戻す
             </AlertDialogAction>
           </AlertDialogFooter>
