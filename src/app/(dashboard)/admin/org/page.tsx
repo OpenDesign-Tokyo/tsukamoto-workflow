@@ -54,6 +54,7 @@ export default function OrgPage() {
   const [deleteTarget, setDeleteTarget] = useState<Department | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
 
   const fetchOrg = useCallback(async () => {
     const supabase = createClient()
@@ -102,6 +103,24 @@ export default function OrgPage() {
     fetchOrg()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Auto-fit zoom after initial load
+  useEffect(() => {
+    if (!isLoading && tree.length > 0) {
+      requestAnimationFrame(() => {
+        const container = containerRef.current
+        const content = contentRef.current
+        if (container && content) {
+          const cw = container.clientWidth
+          const sw = content.scrollWidth
+          if (sw > cw) {
+            const fitZoom = Math.max(0.4, Math.floor((cw / sw) * 10) / 10)
+            setZoom(fitZoom)
+          }
+        }
+      })
+    }
+  }, [isLoading, tree])
 
   const openAddDept = (parentId?: string) => {
     setEditingDept(null)
@@ -170,11 +189,20 @@ export default function OrgPage() {
     }
   }
 
-  const resetZoom = () => {
-    setZoom(1)
-    if (containerRef.current) {
-      containerRef.current.scrollLeft = 0
-      containerRef.current.scrollTop = 0
+  const fitToView = () => {
+    const container = containerRef.current
+    const content = contentRef.current
+    if (container && content) {
+      // Reset to 1 first to get true content width
+      setZoom(1)
+      requestAnimationFrame(() => {
+        const cw = container.clientWidth
+        const sw = content.scrollWidth
+        const fitZoom = sw > cw ? Math.max(0.4, Math.floor((cw / sw) * 10) / 10) : 1
+        setZoom(fitZoom)
+        container.scrollLeft = 0
+        container.scrollTop = 0
+      })
     }
   }
 
@@ -201,7 +229,7 @@ export default function OrgPage() {
             <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setZoom(z => Math.min(1.5, z + 0.1))}>
               <ZoomIn className="w-3.5 h-3.5" />
             </Button>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={resetZoom}>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={fitToView}>
               <Maximize2 className="w-3.5 h-3.5" />
             </Button>
           </div>
@@ -220,8 +248,9 @@ export default function OrgPage() {
           style={{ minHeight: '500px', maxHeight: 'calc(100vh - 280px)' }}
         >
           <div
+            ref={contentRef}
             className="p-8 min-w-fit"
-            style={{ transform: `scale(${zoom})`, transformOrigin: 'top center' }}
+            style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
           >
             {tree.map(root => (
               <OrgChartNode

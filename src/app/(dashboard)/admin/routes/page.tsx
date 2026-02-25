@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { getDemoUserHeader } from '@/lib/auth/demo-auth'
 import { createClient } from '@/lib/supabase/client'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,7 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ArrowRight, Plus, Pencil, Trash2, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, FileText, CheckCircle2, ChevronRight, Route } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DocumentType, Position } from '@/lib/types/database'
 
@@ -46,6 +46,15 @@ interface RouteWithSteps {
   document_type: { id: string; name: string; code: string }
   steps: RouteStep[]
 }
+
+// Step color by index
+const STEP_COLORS = [
+  { bg: 'bg-blue-500', ring: 'ring-blue-100', text: 'text-blue-600', light: 'bg-blue-50' },
+  { bg: 'bg-indigo-500', ring: 'ring-indigo-100', text: 'text-indigo-600', light: 'bg-indigo-50' },
+  { bg: 'bg-violet-500', ring: 'ring-violet-100', text: 'text-violet-600', light: 'bg-violet-50' },
+  { bg: 'bg-purple-500', ring: 'ring-purple-100', text: 'text-purple-600', light: 'bg-purple-50' },
+  { bg: 'bg-emerald-500', ring: 'ring-emerald-100', text: 'text-emerald-600', light: 'bg-emerald-50' },
+]
 
 export default function RoutesPage() {
   const [routes, setRoutes] = useState<RouteWithSteps[]>([])
@@ -143,56 +152,99 @@ export default function RoutesPage() {
   }
 
   if (isLoading) {
-    return <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64" /></div>
+    return <div className="space-y-4"><Skeleton className="h-8 w-48" />{[1,2,3].map(i => <Skeleton key={i} className="h-32" />)}</div>
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">承認ルート管理</h1>
-        <Button size="sm" onClick={openAdd}>
-          <Plus className="w-4 h-4 mr-1" />
+        <div>
+          <h1 className="text-2xl font-bold">承認ルート管理</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{routes.length}件のルート</p>
+        </div>
+        <Button onClick={openAdd}>
+          <Plus className="w-4 h-4 mr-1.5" />
           ルート追加
         </Button>
       </div>
 
-      <div className="space-y-4">
-        {routes.map((route) => (
-          <Card key={route.id}>
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">{route.name}</CardTitle>
-                <div className="flex items-center gap-2">
-                  <Badge variant="secondary">{route.document_type?.name}</Badge>
-                  {route.is_default && <Badge className="bg-blue-100 text-blue-700">デフォルト</Badge>}
-                  <Button variant="ghost" size="sm" onClick={() => openEdit(route)}>
-                    <Pencil className="w-3 h-3" />
-                  </Button>
-                  <Button variant="ghost" size="sm" className="text-red-500" onClick={() => setDeleteTarget(route)}>
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center gap-2 flex-wrap">
-                {route.steps.map((step, idx) => (
-                  <div key={step.step_order} className="flex items-center gap-2">
-                    <div className="px-3 py-1.5 bg-gray-50 rounded-md border text-sm">
-                      <span className="text-xs text-gray-400 mr-1">Step {step.step_order}</span>
-                      <span className="font-medium">{step.name}</span>
-                      {step.position && (
-                        <span className="text-xs text-gray-500 ml-1">({step.position.name})</span>
-                      )}
+      {routes.length === 0 ? (
+        <Card>
+          <CardContent className="py-16 text-center">
+            <Route className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+            <p className="text-gray-500">承認ルートがありません</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {routes.map((route) => (
+            <Card key={route.id} className="group hover:shadow-md transition-shadow overflow-hidden">
+              <CardContent className="p-0">
+                {/* Card header */}
+                <div className="flex items-center justify-between px-5 py-3 bg-gradient-to-r from-gray-50 to-white border-b">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+                      <FileText className="w-4 h-4 text-blue-600" />
                     </div>
-                    {idx < route.steps.length - 1 && <ArrowRight className="w-4 h-4 text-gray-300" />}
+                    <div>
+                      <h3 className="font-semibold text-sm">{route.name}</h3>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 font-normal">
+                          {route.document_type?.name}
+                        </Badge>
+                        {route.is_default && (
+                          <Badge className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0">
+                            デフォルト
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => openEdit(route)}>
+                      <Pencil className="w-3.5 h-3.5 text-gray-400" />
+                    </Button>
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setDeleteTarget(route)}>
+                      <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-500" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Steps flow */}
+                <div className="px-5 py-4">
+                  <div className="flex items-center gap-1 overflow-x-auto">
+                    {route.steps.map((step, idx) => {
+                      const color = STEP_COLORS[idx % STEP_COLORS.length]
+                      return (
+                        <div key={step.step_order} className="flex items-center gap-1 shrink-0">
+                          <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl ${color.light} border border-transparent`}>
+                            {/* Step number circle */}
+                            <div className={`w-7 h-7 rounded-full ${color.bg} flex items-center justify-center shrink-0 shadow-sm`}>
+                              <span className="text-white text-xs font-bold">{step.step_order}</span>
+                            </div>
+                            {/* Step info */}
+                            <div>
+                              <p className={`text-xs font-semibold ${color.text}`}>{step.name}</p>
+                              {step.position && (
+                                <p className="text-[10px] text-gray-400">{step.position.name}</p>
+                              )}
+                            </div>
+                            {/* Check icon */}
+                            <CheckCircle2 className={`w-4 h-4 ${color.text} opacity-30 ml-1`} />
+                          </div>
+                          {idx < route.steps.length - 1 && (
+                            <ChevronRight className="w-4 h-4 text-gray-300 shrink-0 mx-0.5" />
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="max-w-lg">
@@ -221,8 +273,10 @@ export default function RoutesPage() {
               </div>
               <div className="space-y-2">
                 {steps.map((step, idx) => (
-                  <div key={idx} className="flex items-center gap-2 p-2 border rounded-md bg-gray-50">
-                    <span className="text-xs text-gray-400 w-8">#{idx + 1}</span>
+                  <div key={idx} className="flex items-center gap-2 p-2.5 border rounded-lg bg-gray-50/50">
+                    <div className={`w-6 h-6 rounded-full ${STEP_COLORS[idx % STEP_COLORS.length].bg} flex items-center justify-center shrink-0`}>
+                      <span className="text-white text-[10px] font-bold">{idx + 1}</span>
+                    </div>
                     <Input
                       value={step.name}
                       onChange={e => updateStep(idx, 'name', e.target.value)}
@@ -243,8 +297,8 @@ export default function RoutesPage() {
                         {positions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    <Button variant="ghost" size="sm" onClick={() => removeStep(idx)} className="h-8 w-8 p-0 text-red-400">
-                      <X className="w-3 h-3" />
+                    <Button variant="ghost" size="sm" onClick={() => removeStep(idx)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600">
+                      <X className="w-3.5 h-3.5" />
                     </Button>
                   </div>
                 ))}

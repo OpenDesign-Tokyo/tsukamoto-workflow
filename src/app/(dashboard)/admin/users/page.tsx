@@ -28,7 +28,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Pencil, Trash2, Shield } from 'lucide-react'
+import { Plus, Pencil, Trash2, Shield, Search, Mail, Hash, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Department, Position } from '@/lib/types/database'
 
@@ -46,6 +46,30 @@ interface EmployeeWithAssignment {
     position: Position | null
     is_primary: boolean
   }[]
+}
+
+// Gradient palette for avatars based on name hash
+const AVATAR_COLORS = [
+  'from-blue-500 to-blue-600',
+  'from-indigo-500 to-indigo-600',
+  'from-violet-500 to-violet-600',
+  'from-emerald-500 to-emerald-600',
+  'from-teal-500 to-teal-600',
+  'from-cyan-500 to-cyan-600',
+  'from-amber-500 to-amber-600',
+  'from-rose-500 to-rose-600',
+]
+
+function getAvatarColor(name: string) {
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length]
+}
+
+function getInitials(name: string) {
+  const parts = name.split(/[\s　]+/)
+  if (parts.length >= 2) return parts[0][0] + parts[1][0]
+  return name.slice(0, 2)
 }
 
 export default function UsersPage() {
@@ -134,72 +158,109 @@ export default function UsersPage() {
   )
 
   if (isLoading) {
-    return <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-96" /></div>
+    return <div className="space-y-4"><Skeleton className="h-8 w-48" /><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">{[1,2,3,4,5,6].map(i => <Skeleton key={i} className="h-40" />)}</div></div>
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">ユーザー管理</h1>
-        <Button size="sm" onClick={openAdd}>
-          <Plus className="w-4 h-4 mr-1" />
+        <div>
+          <h1 className="text-2xl font-bold">ユーザー管理</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{employees.length}名のユーザー</p>
+        </div>
+        <Button onClick={openAdd}>
+          <Plus className="w-4 h-4 mr-1.5" />
           ユーザー追加
         </Button>
       </div>
 
-      <div className="flex gap-4 items-center">
-        <Input placeholder="名前・メール・社員番号で検索..." value={search} onChange={e => setSearch(e.target.value)} className="max-w-sm" />
-        <span className="text-sm text-gray-500">{filtered.length}件</span>
+      {/* Search */}
+      <div className="relative max-w-md">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <Input
+          placeholder="名前・メール・社員番号で検索..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="pl-10"
+        />
+        {search && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+            {filtered.length}件
+          </span>
+        )}
       </div>
 
-      <Card>
-        <CardContent className="p-0">
-          <table className="w-full">
-            <thead className="bg-gray-50 text-xs text-gray-500">
-              <tr>
-                <th className="text-left p-3">社員番号</th>
-                <th className="text-left p-3">氏名</th>
-                <th className="text-left p-3">メール</th>
-                <th className="text-left p-3">所属</th>
-                <th className="text-left p-3">役職</th>
-                <th className="text-left p-3">権限</th>
-                <th className="text-right p-3">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {filtered.map(emp => {
-                const primary = emp.assignments.find(a => a.is_primary)
-                return (
-                  <tr key={emp.id} className="hover:bg-gray-50">
-                    <td className="p-3 text-sm font-mono">{emp.employee_number}</td>
-                    <td className="p-3 text-sm font-medium">{emp.name}</td>
-                    <td className="p-3 text-sm text-gray-500">{emp.email}</td>
-                    <td className="p-3 text-sm">{primary?.department?.name || '-'}</td>
-                    <td className="p-3 text-sm">{primary?.position?.name || '-'}</td>
-                    <td className="p-3">
-                      {emp.is_admin && (
-                        <Badge variant="secondary" className="text-xs">
-                          <Shield className="w-3 h-3 mr-1" />管理者
-                        </Badge>
-                      )}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="flex gap-1 justify-end">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(emp)}>
-                          <Pencil className="w-3 h-3" />
-                        </Button>
-                        <Button variant="ghost" size="sm" className="text-red-500" onClick={() => setDeleteTarget(emp)}>
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
+      {/* User Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {filtered.map(emp => {
+          const primary = emp.assignments.find(a => a.is_primary)
+          const color = getAvatarColor(emp.name)
+          const initials = getInitials(emp.name)
+
+          return (
+            <Card key={emp.id} className="group hover:shadow-md transition-shadow">
+              <CardContent className="p-0">
+                {/* Card Header with gradient */}
+                <div className={`h-2 rounded-t-lg bg-gradient-to-r ${color}`} />
+
+                <div className="p-4">
+                  <div className="flex items-start gap-3">
+                    {/* Avatar */}
+                    <div className={`w-12 h-12 rounded-full bg-gradient-to-br ${color} flex items-center justify-center shrink-0 shadow-sm`}>
+                      <span className="text-white font-bold text-sm">{initials}</span>
+                    </div>
+
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-semibold text-sm truncate">{emp.name}</h3>
+                        {emp.is_admin && (
+                          <Badge className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0 shrink-0">
+                            <Shield className="w-2.5 h-2.5 mr-0.5" />管理者
+                          </Badge>
+                        )}
                       </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
+                      <p className="text-xs text-gray-400 mt-0.5">{emp.name_kana}</p>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => openEdit(emp)}>
+                        <Pencil className="w-3.5 h-3.5 text-gray-400" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setDeleteTarget(emp)}>
+                        <Trash2 className="w-3.5 h-3.5 text-gray-400 hover:text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Details */}
+                  <div className="mt-3 space-y-1.5">
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <Mail className="w-3.5 h-3.5 text-gray-300 shrink-0" />
+                      <span className="truncate">{emp.email}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <Hash className="w-3.5 h-3.5 text-gray-300 shrink-0" />
+                      <span className="font-mono">{emp.employee_number}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <Building2 className="w-3.5 h-3.5 text-gray-300 shrink-0" />
+                      <span>{primary?.department?.name || '未所属'}</span>
+                      {primary?.position && (
+                        <>
+                          <span className="text-gray-300">|</span>
+                          <span>{primary.position.name}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
 
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="max-w-md">
