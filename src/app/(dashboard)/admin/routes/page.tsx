@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { getDemoUserHeader } from '@/lib/auth/demo-auth'
 import { createClient } from '@/lib/supabase/client'
 import { Card, CardContent } from '@/components/ui/card'
@@ -57,6 +58,15 @@ const STEP_COLORS = [
 ]
 
 export default function RoutesPage() {
+  return (
+    <Suspense fallback={<div className="space-y-4"><Skeleton className="h-8 w-48" />{[1,2,3].map(i => <Skeleton key={i} className="h-32" />)}</div>}>
+      <RoutesPageInner />
+    </Suspense>
+  )
+}
+
+function RoutesPageInner() {
+  const searchParams = useSearchParams()
   const [routes, setRoutes] = useState<RouteWithSteps[]>([])
   const [docTypes, setDocTypes] = useState<DocumentType[]>([])
   const [positions, setPositions] = useState<Position[]>([])
@@ -67,6 +77,7 @@ export default function RoutesPage() {
   const [form, setForm] = useState({ name: '', document_type_id: '', is_default: false })
   const [steps, setSteps] = useState<{ name: string; assignee_type: string; assignee_position_id: string }[]>([])
   const [deleteTarget, setDeleteTarget] = useState<RouteWithSteps | null>(null)
+  const [autoOpenHandled, setAutoOpenHandled] = useState(false)
 
   const fetchData = useCallback(async () => {
     const res = await fetch('/api/admin/routes', { headers: getDemoUserHeader() })
@@ -83,6 +94,27 @@ export default function RoutesPage() {
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // Auto-open dialog when navigating from forms page with ?new=<docTypeId>
+  useEffect(() => {
+    if (autoOpenHandled || isLoading) return
+    const newDocTypeId = searchParams.get('new')
+    if (newDocTypeId) {
+      setAutoOpenHandled(true)
+      setEditingId(null)
+      setForm({
+        name: '標準承認ルート（3段階）',
+        document_type_id: newDocTypeId,
+        is_default: true,
+      })
+      setSteps([
+        { name: '課長承認', assignee_type: 'position_in_department', assignee_position_id: '' },
+        { name: '部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '' },
+        { name: '事業部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '' },
+      ])
+      setShowDialog(true)
+    }
+  }, [searchParams, isLoading, autoOpenHandled])
 
   const openAdd = () => {
     setEditingId(null)

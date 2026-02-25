@@ -1,10 +1,13 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { getDemoUserHeader } from '@/lib/auth/demo-auth'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Dialog,
@@ -23,7 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Eye, EyeOff, Upload, Trash2, GripVertical } from 'lucide-react'
+import { Pencil, Eye, EyeOff, Upload, Trash2, GripVertical, Plus, AlertTriangle, ArrowRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils/format'
 import { FormRenderer } from '@/components/forms/FormRenderer'
@@ -63,6 +66,8 @@ interface DocumentType {
   code: string
   category: string
 }
+
+const DOC_CATEGORIES = ['社内申請', '経費・精算', '出荷証明書', '営業・企画', 'その他']
 
 // ============================================================================
 // Sortable row component
@@ -137,10 +142,105 @@ function SortableTemplateRow({
 }
 
 // ============================================================================
+// New Document Type Form
+// ============================================================================
+
+function NewDocTypeForm({
+  onCreated,
+  onCancel,
+}: {
+  onCreated: (dt: DocumentType) => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState('')
+  const [code, setCode] = useState('')
+  const [category, setCategory] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+
+  const handleSubmit = async () => {
+    if (!name || !code || !category) {
+      toast.error('すべての項目を入力してください')
+      return
+    }
+    setIsSaving(true)
+    try {
+      const res = await fetch('/api/admin/document-types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+        body: JSON.stringify({ name, code, category }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.error || '作成に失敗しました')
+        return
+      }
+      const dt = await res.json()
+      toast.success(`書類種別「${dt.name}」を作成しました`)
+      onCreated(dt)
+    } catch {
+      toast.error('エラーが発生しました')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Plus className="w-4 h-4 text-amber-600" />
+        <p className="text-sm font-medium text-amber-800">新しい書類種別を作成</p>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <div>
+          <Label className="text-xs text-gray-600">種別名 *</Label>
+          <Input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="例: 備品貸出申請書"
+            className="h-8 text-sm mt-1"
+          />
+        </div>
+        <div>
+          <Label className="text-xs text-gray-600">コード *</Label>
+          <Input
+            value={code}
+            onChange={e => setCode(e.target.value)}
+            placeholder="例: T21"
+            className="h-8 text-sm mt-1"
+          />
+        </div>
+        <div>
+          <Label className="text-xs text-gray-600">カテゴリ *</Label>
+          <Select value={category} onValueChange={setCategory}>
+            <SelectTrigger className="h-8 text-sm mt-1">
+              <SelectValue placeholder="選択" />
+            </SelectTrigger>
+            <SelectContent>
+              {DOC_CATEGORIES.map(c => (
+                <SelectItem key={c} value={c}>{c}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="flex gap-2 justify-end">
+        <Button variant="ghost" size="sm" onClick={onCancel} className="h-7 text-xs">
+          キャンセル
+        </Button>
+        <Button size="sm" onClick={handleSubmit} disabled={isSaving} className="h-7 text-xs">
+          {isSaving ? '作成中...' : '種別を作成'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
 // Main page
 // ============================================================================
 
 export default function FormsPage() {
+  const router = useRouter()
   const [templates, setTemplates] = useState<FormTemplateRow[]>([])
   const [allDocTypes, setAllDocTypes] = useState<DocumentType[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -149,11 +249,13 @@ export default function FormsPage() {
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [importedSchema, setImportedSchema] = useState<FormSchema | null>(null)
   const [selectedDocTypeId, setSelectedDocTypeId] = useState<string>('')
+  const [showNewDocType, setShowNewDocType] = useState(false)
+  const [routePromptDocType, setRoutePromptDocType] = useState<DocumentType | null>(null)
 
   const fetchData = useCallback(async () => {
     const [templatesRes, docTypesRes] = await Promise.all([
-      fetch('/api/admin/templates', { headers: getDemoUserHeader() }),
-      fetch('/api/admin/document-types', { headers: getDemoUserHeader() }),
+      fetch('/api/admin/templates', { headers: getDemoUserHeader(), cache: 'no-store' }),
+      fetch('/api/admin/document-types', { headers: getDemoUserHeader(), cache: 'no-store' }),
     ])
     if (templatesRes.ok) setTemplates(await templatesRes.json())
     if (docTypesRes.ok) setAllDocTypes(await docTypesRes.json())
@@ -177,7 +279,6 @@ export default function FormsPage() {
     const reordered = arrayMove(templates, oldIndex, newIndex)
     setTemplates(reordered)
 
-    // Persist new order by updating document_types.sort_order
     const order = reordered.map((t, i) => ({
       document_type_id: t.document_type?.id,
       sort_order: i,
@@ -190,7 +291,6 @@ export default function FormsPage() {
         body: JSON.stringify({ order }),
       })
     } catch {
-      // Revert on error
       await fetchData()
     }
   }
@@ -208,6 +308,17 @@ export default function FormsPage() {
     await fetchData()
   }
 
+  const checkApprovalRoute = useCallback(async (docTypeId: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/admin/routes', { headers: getDemoUserHeader(), cache: 'no-store' })
+      if (!res.ok) return true // Don't block on error
+      const routes = await res.json()
+      return routes.some((r: { document_type?: { id: string } }) => r.document_type?.id === docTypeId)
+    } catch {
+      return true
+    }
+  }, [])
+
   const createFromExcel = async (schema: FormSchema) => {
     if (!selectedDocTypeId) {
       throw new Error('書類種別を選択してください')
@@ -221,15 +332,36 @@ export default function FormsPage() {
       const data = await res.json()
       throw new Error(data.error || '作成に失敗しました')
     }
-    // Save succeeded - navigate back to list and refresh
+
+    // Check if approval route exists for this doc type
+    const hasRoute = await checkApprovalRoute(selectedDocTypeId)
+
+    // Refresh data first, then navigate back to list
+    await fetchData()
+
+    const savedDocTypeId = selectedDocTypeId
     setImportedSchema(null)
     setSelectedDocTypeId('')
-    await fetchData()
+    setShowNewDocType(false)
+
+    // Prompt to set up approval route if missing
+    if (!hasRoute) {
+      const docType = allDocTypes.find(dt => dt.id === savedDocTypeId)
+      if (docType) {
+        setRoutePromptDocType(docType)
+      }
+    }
   }
 
   const handleExcelImport = (schema: FormSchema) => {
     setImportedSchema(schema)
     setShowImportDialog(false)
+  }
+
+  const handleNewDocTypeCreated = (dt: DocumentType) => {
+    setAllDocTypes(prev => [...prev, dt])
+    setSelectedDocTypeId(dt.id)
+    setShowNewDocType(false)
   }
 
   const [deleteTarget, setDeleteTarget] = useState<FormTemplateRow | null>(null)
@@ -277,29 +409,59 @@ export default function FormsPage() {
   if (importedSchema) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-          <Upload className="w-5 h-5 text-blue-600 shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-blue-800">Excelインポートから新規テンプレートを作成</p>
-            <p className="text-xs text-blue-600">保存先の書類種別を選択してください</p>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+          <div className="flex items-center gap-3">
+            <Upload className="w-5 h-5 text-blue-600 shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-blue-800">Excelインポートから新規テンプレートを作成</p>
+              <p className="text-xs text-blue-600">保存先の書類種別を選択してください</p>
+            </div>
           </div>
-          <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
-            <SelectTrigger className="w-60 h-9">
-              <SelectValue placeholder="書類種別を選択" />
-            </SelectTrigger>
-            <SelectContent>
-              {allDocTypes.map(dt => (
-                <SelectItem key={dt.id} value={dt.id}>{dt.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+          <div className="flex items-center gap-3">
+            <Select value={selectedDocTypeId} onValueChange={(val) => {
+              if (val === '__new__') {
+                setShowNewDocType(true)
+                setSelectedDocTypeId('')
+              } else {
+                setShowNewDocType(false)
+                setSelectedDocTypeId(val)
+              }
+            }}>
+              <SelectTrigger className="w-72 h-9">
+                <SelectValue placeholder="書類種別を選択" />
+              </SelectTrigger>
+              <SelectContent>
+                {allDocTypes.map(dt => (
+                  <SelectItem key={dt.id} value={dt.id}>{dt.name}</SelectItem>
+                ))}
+                <SelectItem value="__new__" className="text-blue-600 font-medium">
+                  <span className="flex items-center gap-1.5">
+                    <Plus className="w-3.5 h-3.5" />
+                    新しい書類種別を作成
+                  </span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {showNewDocType && (
+            <NewDocTypeForm
+              onCreated={handleNewDocTypeCreated}
+              onCancel={() => setShowNewDocType(false)}
+            />
+          )}
         </div>
         <TemplateEditor
           initialSchema={importedSchema}
           templateId=""
-          templateName="新規テンプレート（Excelインポート）"
+          templateName={
+            selectedDocTypeId
+              ? `新規テンプレート: ${allDocTypes.find(dt => dt.id === selectedDocTypeId)?.name || ''}`
+              : '新規テンプレート（Excelインポート）'
+          }
           onSave={schema => createFromExcel(schema)}
-          onCancel={() => { setImportedSchema(null); setSelectedDocTypeId('') }}
+          onCancel={() => { setImportedSchema(null); setSelectedDocTypeId(''); setShowNewDocType(false) }}
         />
       </div>
     )
@@ -389,6 +551,40 @@ export default function FormsPage() {
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
               削除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Approval Route Setup Prompt */}
+      <AlertDialog open={!!routePromptDocType} onOpenChange={() => setRoutePromptDocType(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-500" />
+              承認ルートが未設定です
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <span className="block">
+                「{routePromptDocType?.name}」の承認ルートがまだ設定されていません。
+              </span>
+              <span className="block text-amber-600 font-medium">
+                承認ルートがないと、この書類種別で申請を提出しても承認フローが開始されません。
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>後で設定する</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const dtId = routePromptDocType?.id
+                setRoutePromptDocType(null)
+                router.push(`/admin/routes?new=${dtId}`)
+              }}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              承認ルートを設定する
+              <ArrowRight className="w-4 h-4 ml-1" />
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

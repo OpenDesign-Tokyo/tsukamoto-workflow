@@ -120,7 +120,7 @@ export async function exportApplicationPdf(
           body: tableBody,
           margin: { left: 14 },
           styles: { fontSize: 8, font: fontName },
-          headStyles: { fillColor: [30, 58, 95], font: fontName },
+          headStyles: { fillColor: [30, 58, 95], font: fontName, fontStyle: 'normal' },
         })
         // @ts-expect-error lastAutoTable set by jspdf-autotable
         y = doc.lastAutoTable.finalY + 5
@@ -185,7 +185,7 @@ export async function exportApplicationPdf(
       body: approvalBody,
       margin: { left: 14 },
       styles: { fontSize: 8, font: fontName },
-      headStyles: { fillColor: [30, 58, 95], font: fontName },
+      headStyles: { fillColor: [30, 58, 95], font: fontName, fontStyle: 'normal' },
     })
   }
 
