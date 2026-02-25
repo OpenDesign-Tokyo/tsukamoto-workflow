@@ -11,6 +11,7 @@ import { StatusBadge } from '@/components/workflow/StatusBadge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,11 +22,23 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ArrowLeft, User, Calendar, Hash, Pencil, XCircle } from 'lucide-react'
-import { formatDate } from '@/lib/utils/format'
+import { ArrowLeft, User, Calendar, Hash, Pencil, XCircle, Send, Download } from 'lucide-react'
+import { formatDate, formatDateTime } from '@/lib/utils/format'
 import { toast } from 'sonner'
 import type { ApplicationStatus } from '@/lib/types/workflow'
 import type { FormSchema } from '@/lib/types/database'
+import { createClient } from '@/lib/supabase/client'
+import { exportApplicationPdf } from '@/lib/utils/exportPdf'
+
+interface Comment {
+  id: string
+  application_id: string
+  author_id: string
+  body: string
+  is_internal: boolean
+  created_at: string
+  author?: { name: string }
+}
 
 export default function ApplicationDetailPage() {
   const params = useParams()
@@ -36,11 +49,15 @@ export default function ApplicationDetailPage() {
   const [application, setApplication] = useState<any>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [showWithdrawConfirm, setShowWithdrawConfirm] = useState(false)
-  const [isWithdrawing, setIsWithdrawing] = useState(false)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const [comments, setComments] = useState<Comment[]>([])
+  const [newComment, setNewComment] = useState('')
+  const [isSendingComment, setIsSendingComment] = useState(false)
 
   const fetchApplication = useCallback(async () => {
     const res = await fetch(`/api/applications/${id}`, {
       headers: getDemoUserHeader(),
+      cache: 'no-store',
     })
     if (res.ok) {
       setApplication(await res.json())
@@ -48,57 +65,102 @@ export default function ApplicationDetailPage() {
     setIsLoading(false)
   }, [id])
 
+  const fetchComments = useCallback(async () => {
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('application_comments')
+      .select('*, author:employees!author_id(name)')
+      .eq('application_id', id)
+      .order('created_at', { ascending: true })
+    if (data) setComments(data as Comment[])
+  }, [id])
+
   useEffect(() => {
     fetchApplication()
-  }, [fetchApplication])
+    fetchComments()
+  }, [fetchApplication, fetchComments])
 
   const handleApprove = async (comment?: string) => {
-    const res = await fetch(`/api/applications/${id}/approve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
-      body: JSON.stringify({ comment }),
-    })
-    if (res.ok) {
-      toast.success('承認しました')
-      fetchApplication()
-    } else {
-      const data = await res.json()
-      toast.error(data.error || '承認に失敗しました')
+    setIsProcessing(true)
+    try {
+      const res = await fetch(`/api/applications/${id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+        body: JSON.stringify({ comment }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.application) setApplication(data.application)
+        else await fetchApplication()
+        toast.success('承認しました')
+      } else {
+        const data = await res.json()
+        toast.error(data.error || '承認に失敗しました')
+      }
+    } finally {
+      setIsProcessing(false)
     }
   }
 
   const handleReject = async (comment: string) => {
-    const res = await fetch(`/api/applications/${id}/reject`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
-      body: JSON.stringify({ comment }),
-    })
-    if (res.ok) {
-      toast.success('差戻ししました')
-      fetchApplication()
-    } else {
-      const data = await res.json()
-      toast.error(data.error || '差戻しに失敗しました')
+    setIsProcessing(true)
+    try {
+      const res = await fetch(`/api/applications/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+        body: JSON.stringify({ comment }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.application) setApplication(data.application)
+        else await fetchApplication()
+        toast.success('差戻ししました')
+      } else {
+        const data = await res.json()
+        toast.error(data.error || '差戻しに失敗しました')
+      }
+    } finally {
+      setIsProcessing(false)
     }
   }
 
   const handleWithdraw = async () => {
-    setIsWithdrawing(true)
+    setIsProcessing(true)
     try {
       const res = await fetch(`/api/applications/${id}/withdraw`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
       })
       if (res.ok) {
+        const data = await res.json()
+        if (data.application) setApplication(data.application)
+        else await fetchApplication()
         toast.success('申請を取り下げました')
-        fetchApplication()
       } else {
         const data = await res.json()
         toast.error(data.error || '取下げに失敗しました')
       }
     } finally {
-      setIsWithdrawing(false)
+      setIsProcessing(false)
       setShowWithdrawConfirm(false)
+    }
+  }
+
+  const handleSendComment = async () => {
+    if (!newComment.trim() || !currentUser) return
+    setIsSendingComment(true)
+    try {
+      const supabase = createClient()
+      await supabase.from('application_comments').insert({
+        application_id: id,
+        author_id: currentUser.id,
+        body: newComment.trim(),
+        is_internal: false,
+      })
+      setNewComment('')
+      await fetchComments()
+    } finally {
+      setIsSendingComment(false)
     }
   }
 
@@ -129,7 +191,7 @@ export default function ApplicationDetailPage() {
   const canWithdraw = isApplicant && (application.status === 'submitted' || application.status === 'in_approval')
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-6xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => router.back()}>
@@ -142,6 +204,16 @@ export default function ApplicationDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          {schema && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => exportApplicationPdf(application, schema)}
+            >
+              <Download className="w-4 h-4 mr-1" />
+              PDF
+            </Button>
+          )}
           {canEdit && (
             <Button
               variant="outline"
@@ -158,6 +230,7 @@ export default function ApplicationDetailPage() {
               size="sm"
               className="text-red-600 hover:text-red-700 hover:bg-red-50"
               onClick={() => setShowWithdrawConfirm(true)}
+              disabled={isProcessing}
             >
               <XCircle className="w-4 h-4 mr-1" />
               取下げ
@@ -217,8 +290,9 @@ export default function ApplicationDetailPage() {
           )}
         </div>
 
-        {/* Sidebar: Approval timeline + actions */}
+        {/* Right sidebar */}
         <div className="space-y-4">
+          {/* Approval Timeline */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">承認状況</CardTitle>
@@ -238,6 +312,7 @@ export default function ApplicationDetailPage() {
               applicationId={application.id}
               onApprove={handleApprove}
               onReject={handleReject}
+              disabled={isProcessing}
             />
           )}
 
@@ -246,12 +321,8 @@ export default function ApplicationDetailPage() {
             <Card>
               <CardContent className="p-4">
                 <p className="text-sm text-gray-500 mb-3">差戻されました。修正して再申請できます。</p>
-                <Button
-                  className="w-full"
-                  onClick={() => router.push(`/applications/${id}/edit`)}
-                >
-                  <Pencil className="w-4 h-4 mr-2" />
-                  修正して再申請
+                <Button className="w-full" onClick={() => router.push(`/applications/${id}/edit`)}>
+                  <Pencil className="w-4 h-4 mr-2" />修正して再申請
                 </Button>
               </CardContent>
             </Card>
@@ -262,16 +333,52 @@ export default function ApplicationDetailPage() {
             <Card>
               <CardContent className="p-4">
                 <p className="text-sm text-gray-500 mb-3">下書き状態です。編集して申請できます。</p>
-                <Button
-                  className="w-full"
-                  onClick={() => router.push(`/applications/${id}/edit`)}
-                >
-                  <Pencil className="w-4 h-4 mr-2" />
-                  編集する
+                <Button className="w-full" onClick={() => router.push(`/applications/${id}/edit`)}>
+                  <Pencil className="w-4 h-4 mr-2" />編集する
                 </Button>
               </CardContent>
             </Card>
           )}
+
+          {/* Comments */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">コメント</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {comments.length === 0 && (
+                <p className="text-xs text-gray-400 text-center py-2">コメントはまだありません</p>
+              )}
+              {comments.map((c) => (
+                <div key={c.id} className="bg-gray-50 rounded-md p-2.5">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium text-gray-700">{c.author?.name || '不明'}</span>
+                    <span className="text-[10px] text-gray-400">{formatDateTime(c.created_at)}</span>
+                  </div>
+                  <p className="text-sm text-gray-600 whitespace-pre-wrap">{c.body}</p>
+                </div>
+              ))}
+              {currentUser && application.status !== 'draft' && (
+                <div className="flex gap-2">
+                  <Textarea
+                    value={newComment}
+                    onChange={e => setNewComment(e.target.value)}
+                    placeholder="コメントを入力..."
+                    rows={2}
+                    className="text-sm"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={handleSendComment}
+                    disabled={!newComment.trim() || isSendingComment}
+                    className="shrink-0 self-end"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
 
@@ -288,7 +395,7 @@ export default function ApplicationDetailPage() {
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleWithdraw}
-              disabled={isWithdrawing}
+              disabled={isProcessing}
               className="bg-red-600 hover:bg-red-700"
             >
               取り下げる

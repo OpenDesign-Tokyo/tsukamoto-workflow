@@ -37,12 +37,12 @@ export interface WorkflowRejectResult {
 
 export const STATUS_LABELS: Record<ApplicationStatus, string> = {
   draft: '下書き',
-  submitted: '申請済み',
+  submitted: '提出済み',
   in_approval: '承認中',
   approved: '決裁済み',
   rejected: '差戻し',
   withdrawn: '取下げ',
-  archived: 'アーカイブ',
+  archived: '保管済み',
 }
 
 export const STATUS_COLORS: Record<ApplicationStatus, string> = {

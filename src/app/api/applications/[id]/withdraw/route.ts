@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendWorkflowNotification } from '@/lib/workflow/notifications'
+import { writeAuditLog } from '@/lib/audit/logger'
 
 export async function POST(
   req: NextRequest,
@@ -63,6 +64,13 @@ export async function POST(
     .eq('application_id', id)
     .eq('action', 'pending')
 
+  await writeAuditLog({
+    actorId: userId,
+    action: 'application.withdraw',
+    targetType: 'application',
+    targetId: id,
+  })
+
   // Notify pending approvers
   if (pendingRecords) {
     for (const record of pendingRecords) {
@@ -77,5 +85,25 @@ export async function POST(
     }
   }
 
-  return NextResponse.json({ success: true })
+  // Return updated application for immediate UI refresh
+  const { data: updated } = await supabase
+    .from('applications')
+    .select(`
+      *,
+      document_type:document_types(*),
+      form_template:form_templates(*),
+      applicant:employees!applicant_id(*),
+      approval_records(
+        *,
+        approver:employees!approver_id(*)
+      )
+    `)
+    .eq('id', id)
+    .maybeSingle()
+
+  if (updated?.approval_records) {
+    updated.approval_records.sort((a: { step_order: number }, b: { step_order: number }) => a.step_order - b.step_order)
+  }
+
+  return NextResponse.json({ success: true, application: updated })
 }

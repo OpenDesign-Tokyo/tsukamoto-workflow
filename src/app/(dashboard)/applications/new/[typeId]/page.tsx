@@ -22,6 +22,7 @@ import { Save, Send, ArrowLeft, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DocumentType, FormTemplate, FormSchema } from '@/lib/types/database'
 import { format } from 'date-fns'
+import { validateFormData } from '@/lib/utils/validateForm'
 
 export default function NewApplicationFormPage() {
   const params = useParams()
@@ -35,6 +36,7 @@ export default function NewApplicationFormPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const fetchData = async () => {
@@ -79,6 +81,20 @@ export default function NewApplicationFormPage() {
 
   const handleSubmit = async (isDraft: boolean) => {
     if (!template || !docType || !currentUser) return
+
+    // Validate on submit (not draft)
+    if (!isDraft) {
+      const schema = template.schema as unknown as FormSchema
+      const errors = validateFormData(schema, formData)
+      if (errors.length > 0) {
+        const errorMap: Record<string, string> = {}
+        errors.forEach(e => { errorMap[e.fieldId] = e.message })
+        setValidationErrors(errorMap)
+        toast.error(`入力エラーが${errors.length}件あります`)
+        return
+      }
+      setValidationErrors({})
+    }
 
     setIsSubmitting(true)
     try {
@@ -156,6 +172,7 @@ export default function NewApplicationFormPage() {
         schema={schema}
         formData={formData}
         onChange={setFormData}
+        errors={validationErrors}
       />
 
       <div className="flex gap-3 justify-end sticky bottom-6 bg-white/80 backdrop-blur p-4 rounded-lg border shadow-sm">

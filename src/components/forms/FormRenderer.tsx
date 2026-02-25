@@ -18,6 +18,7 @@ interface Props {
   formData: Record<string, unknown>
   onChange?: (data: Record<string, unknown>) => void
   readOnly?: boolean
+  errors?: Record<string, string>
 }
 
 function evaluateSumFormula(formula: string, formData: Record<string, unknown>): number {
@@ -35,7 +36,7 @@ function evaluateSumFormula(formula: string, formData: Record<string, unknown>):
   return 0
 }
 
-export function FormRenderer({ schema, formData, onChange, readOnly = false }: Props) {
+export function FormRenderer({ schema, formData, onChange, readOnly = false, errors = {} }: Props) {
   const fieldMap = useMemo(() => {
     const map = new Map<string, FormField>()
     schema.fields.forEach((f) => map.set(f.id, f))
@@ -52,7 +53,9 @@ export function FormRenderer({ schema, formData, onChange, readOnly = false }: P
     if (!field) return null
 
     const value = formData[fieldId]
+    const error = errors[fieldId]
 
+    const fieldElement = (() => {
     switch (field.type) {
       case 'text':
         return (
@@ -135,6 +138,14 @@ export function FormRenderer({ schema, formData, onChange, readOnly = false }: P
       default:
         return null
     }
+    })()
+
+    return (
+      <div key={fieldId}>
+        {fieldElement}
+        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+      </div>
+    )
   }
 
   if (schema.layout?.sections) {

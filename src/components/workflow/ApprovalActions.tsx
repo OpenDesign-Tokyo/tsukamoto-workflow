@@ -19,9 +19,10 @@ interface Props {
   applicationId: string
   onApprove: (comment?: string) => Promise<void>
   onReject: (comment: string) => Promise<void>
+  disabled?: boolean
 }
 
-export function ApprovalActions({ applicationId, onApprove, onReject }: Props) {
+export function ApprovalActions({ applicationId, onApprove, onReject, disabled }: Props) {
   const [comment, setComment] = useState('')
   const [isApproving, setIsApproving] = useState(false)
   const [isRejecting, setIsRejecting] = useState(false)
@@ -64,7 +65,7 @@ export function ApprovalActions({ applicationId, onApprove, onReject }: Props) {
         <Button
           onClick={() => setShowApproveDialog(true)}
           className="bg-green-600 hover:bg-green-700 flex-1"
-          disabled={isApproving || isRejecting}
+          disabled={disabled || isApproving || isRejecting}
         >
           <Check className="w-4 h-4 mr-2" />
           承認する
@@ -79,7 +80,7 @@ export function ApprovalActions({ applicationId, onApprove, onReject }: Props) {
             setShowRejectDialog(true)
           }}
           className="flex-1"
-          disabled={isApproving || isRejecting}
+          disabled={disabled || isApproving || isRejecting}
         >
           <X className="w-4 h-4 mr-2" />
           差戻す

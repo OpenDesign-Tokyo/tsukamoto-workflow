@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { submitApplication } from '@/lib/workflow/engine'
+import { writeAuditLog } from '@/lib/audit/logger'
 
 export async function GET(req: NextRequest) {
   const supabase = createAdminClient()
@@ -68,6 +69,14 @@ export async function POST(req: NextRequest) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  await writeAuditLog({
+    actorId: userId,
+    action: body.submit ? 'application.submit' : 'application.create',
+    targetType: 'application',
+    targetId: application.id,
+    metadata: { title: body.title, documentTypeId: body.document_type_id },
+  })
 
   // If submitting, start workflow
   if (body.submit && application) {

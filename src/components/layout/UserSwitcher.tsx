@@ -20,12 +20,12 @@ interface DemoUser extends Employee {
 }
 
 const ROLE_LABELS: Record<string, string> = {
-  'tanaka@tsukamoto-demo.com': '営業1課 一般（申請者）',
+  'tanaka@tsukamoto-demo.com': '営業1課 一般社員（申請者）',
   'sato@tsukamoto-demo.com': '営業1課 課長（第1承認者）',
-  'suzuki@tsukamoto-demo.com': '営業1課 係長',
-  'takahashi@tsukamoto-demo.com': '営業部 部長（第2承認者）',
-  'yamamoto@tsukamoto-demo.com': '事業部長（最終承認者）',
-  'admin@tsukamoto-demo.com': '管理者ロール',
+  'suzuki@tsukamoto-demo.com': '営業部 部長（第2承認者）',
+  'yamada@tsukamoto-demo.com': 'ユニフォーム事業部 事業部長（最終承認者）',
+  'takahashi@tsukamoto-demo.com': '営業2課 課長',
+  'admin@tsukamoto-demo.com': '業務管理部（システム管理者）',
 }
 
 export function UserSwitcher() {
