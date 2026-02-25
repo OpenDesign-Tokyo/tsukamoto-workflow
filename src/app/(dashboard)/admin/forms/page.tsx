@@ -210,8 +210,7 @@ export default function FormsPage() {
 
   const createFromExcel = async (schema: FormSchema) => {
     if (!selectedDocTypeId) {
-      toast.error('書類種別を選択してください')
-      return
+      throw new Error('書類種別を選択してください')
     }
     const res = await fetch('/api/admin/templates', {
       method: 'POST',
@@ -222,7 +221,7 @@ export default function FormsPage() {
       const data = await res.json()
       throw new Error(data.error || '作成に失敗しました')
     }
-    toast.success('新しいテンプレートを作成しました')
+    // Save succeeded - navigate back to list and refresh
     setImportedSchema(null)
     setSelectedDocTypeId('')
     await fetchData()
