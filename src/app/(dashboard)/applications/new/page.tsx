@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   Ruler, Plane, FileText, Lightbulb, AlertTriangle, AlertCircle,
   Edit, ShoppingCart, Maximize, Calendar, Truck, Receipt, FileSpreadsheet,
+  Train, Package, Stamp, Wallet, ClipboardCheck,
 } from 'lucide-react'
 import type { DocumentType } from '@/lib/types/database'
 
@@ -25,6 +26,11 @@ const ICON_MAP: Record<string, React.ElementType> = {
   truck: Truck,
   receipt: Receipt,
   'file-spreadsheet': FileSpreadsheet,
+  train: Train,
+  package: Package,
+  stamp: Stamp,
+  wallet: Wallet,
+  'clipboard-check': ClipboardCheck,
 }
 
 export default function NewApplicationPage() {

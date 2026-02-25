@@ -1,10 +1,10 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useState, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Upload } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils/format'
 import type { FormField, TableColumn } from '@/lib/types/database'
 
@@ -30,6 +30,90 @@ function evaluateFormula(formula: string, row: Record<string, unknown>): number 
 export function TableField({ field, value, onChange, readOnly }: Props) {
   const rows = value || [{}]
   const columns = field.columns || []
+  const [isDragging, setIsDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const processExcelData = useCallback(async (file: File) => {
+    try {
+      const XLSX = await import('xlsx')
+      const data = await file.arrayBuffer()
+      const wb = XLSX.read(data, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown as unknown[][]
+
+      if (!jsonData.length) return
+
+      // First row might be headers - check if they match column labels
+      const editableColumns = columns.filter(c => c.type !== 'formula')
+      let dataRows = jsonData
+
+      // Check if first row looks like headers
+      const firstRow = jsonData[0]
+      if (firstRow && editableColumns.some(col =>
+        firstRow.some(cell => typeof cell === 'string' && col.label && cell.includes(col.label))
+      )) {
+        dataRows = jsonData.slice(1)
+      }
+
+      const newRows = dataRows
+        .filter(row => row.some(cell => cell != null && cell !== ''))
+        .map(pastedRow => {
+          const row: Record<string, unknown> = {}
+          editableColumns.forEach((col, colIdx) => {
+            const val = pastedRow[colIdx]
+            if (col.type === 'number' || col.type === 'currency') {
+              row[col.id] = val != null ? Number(String(val).replace(/[,¥]/g, '')) || 0 : ''
+            } else {
+              row[col.id] = val != null ? String(val) : ''
+            }
+          })
+          columns.forEach(col => {
+            if (col.type === 'formula' && col.formula) {
+              row[col.id] = evaluateFormula(col.formula, row)
+            }
+          })
+          return row
+        })
+
+      if (newRows.length > 0) {
+        onChange(newRows)
+      }
+    } catch {
+      // silently fail
+    }
+  }, [columns, onChange])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+
+    const files = e.dataTransfer.files
+    if (files.length > 0) {
+      const file = files[0]
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls') || file.name.endsWith('.csv')) {
+        processExcelData(file)
+      }
+    }
+  }, [processExcelData])
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) processExcelData(file)
+    e.target.value = ''
+  }, [processExcelData])
 
   const addRow = () => {
     if (field.maxRows && rows.length >= field.maxRows) return
@@ -92,12 +176,36 @@ export function TableField({ field, value, onChange, readOnly }: Props) {
       </Label>
 
       {field.allowExcelPaste && !readOnly && (
-        <p className="text-xs text-gray-500">
-          Excelからのコピー＆ペーストに対応しています（Ctrl+V）
-        </p>
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <span>Excelからのコピー＆ペースト（Ctrl+V）またはファイルのドラッグ＆ドロップに対応</span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-6 text-xs px-2"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="w-3 h-3 mr-1" />
+            ファイル選択
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+        </div>
       )}
 
-      <div className="border rounded-md overflow-x-auto">
+      <div
+        className={`border rounded-md overflow-x-auto transition-colors ${
+          isDragging ? 'border-blue-400 bg-blue-50/50 border-dashed border-2' : ''
+        }`}
+        onDragOver={field.allowExcelPaste && !readOnly ? handleDragOver : undefined}
+        onDragLeave={field.allowExcelPaste && !readOnly ? handleDragLeave : undefined}
+        onDrop={field.allowExcelPaste && !readOnly ? handleDrop : undefined}
+      >
         <table className="w-full text-sm" onPaste={handlePaste}>
           <thead className="bg-gray-50">
             <tr>
