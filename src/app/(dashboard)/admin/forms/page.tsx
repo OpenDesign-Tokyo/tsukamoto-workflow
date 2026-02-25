@@ -23,12 +23,29 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Eye, EyeOff, Upload, Trash2 } from 'lucide-react'
+import { Pencil, Eye, EyeOff, Upload, Trash2, GripVertical } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils/format'
 import { FormRenderer } from '@/components/forms/FormRenderer'
 import { TemplateEditor } from '@/components/admin/TemplateEditor'
 import { ExcelTemplateImporter } from '@/components/admin/ExcelTemplateImporter'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import type { FormSchema } from '@/lib/types/database'
 
 interface FormTemplateRow {
@@ -37,11 +54,95 @@ interface FormTemplateRow {
   is_current: boolean
   created_at: string
   schema: unknown
-  document_type: { id: string; name: string; code: string }
+  document_type: { id: string; name: string; code: string; sort_order?: number }
 }
+
+interface DocumentType {
+  id: string
+  name: string
+  code: string
+  category: string
+}
+
+// ============================================================================
+// Sortable row component
+// ============================================================================
+
+function SortableTemplateRow({
+  t,
+  previewId,
+  onTogglePreview,
+  onEdit,
+  onDelete,
+}: {
+  t: FormTemplateRow
+  previewId: string | null
+  onTogglePreview: (id: string) => void
+  onEdit: (t: FormTemplateRow) => void
+  onDelete: (t: FormTemplateRow) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  const fieldCount = (t.schema as Record<string, unknown[]>)?.fields?.length || 0
+
+  return (
+    <tr ref={setNodeRef} style={style} className="hover:bg-gray-50">
+      <td className="p-3 w-8">
+        <button
+          type="button"
+          className="cursor-grab text-gray-400 hover:text-gray-600"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="w-4 h-4" />
+        </button>
+      </td>
+      <td className="p-3 text-sm font-medium">{t.document_type?.name}</td>
+      <td className="p-3 text-sm">v{t.version}</td>
+      <td className="p-3 text-sm">{fieldCount}件</td>
+      <td className="p-3">
+        {t.is_current ? (
+          <Badge className="bg-green-100 text-green-700">現行</Badge>
+        ) : (
+          <Badge variant="secondary">旧版</Badge>
+        )}
+      </td>
+      <td className="p-3 text-sm text-gray-500">{formatDate(t.created_at)}</td>
+      <td className="p-3 text-right">
+        <div className="flex gap-1 justify-end">
+          <Button variant="ghost" size="sm" onClick={() => onTogglePreview(t.id)}>
+            {previewId === t.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => onEdit(t)}>
+            <Pencil className="w-3 h-3" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onDelete(t)}
+            className="text-gray-400 hover:text-red-600"
+          >
+            <Trash2 className="w-3 h-3" />
+          </Button>
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+// ============================================================================
+// Main page
+// ============================================================================
 
 export default function FormsPage() {
   const [templates, setTemplates] = useState<FormTemplateRow[]>([])
+  const [allDocTypes, setAllDocTypes] = useState<DocumentType[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [previewId, setPreviewId] = useState<string | null>(null)
   const [editTemplate, setEditTemplate] = useState<FormTemplateRow | null>(null)
@@ -50,12 +151,49 @@ export default function FormsPage() {
   const [selectedDocTypeId, setSelectedDocTypeId] = useState<string>('')
 
   const fetchData = useCallback(async () => {
-    const res = await fetch('/api/admin/templates', { headers: getDemoUserHeader() })
-    if (res.ok) setTemplates(await res.json())
+    const [templatesRes, docTypesRes] = await Promise.all([
+      fetch('/api/admin/templates', { headers: getDemoUserHeader() }),
+      fetch('/api/admin/document-types', { headers: getDemoUserHeader() }),
+    ])
+    if (templatesRes.ok) setTemplates(await templatesRes.json())
+    if (docTypesRes.ok) setAllDocTypes(await docTypesRes.json())
     setIsLoading(false)
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // Drag-and-drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+
+    const oldIndex = templates.findIndex(t => t.id === active.id)
+    const newIndex = templates.findIndex(t => t.id === over.id)
+    const reordered = arrayMove(templates, oldIndex, newIndex)
+    setTemplates(reordered)
+
+    // Persist new order by updating document_types.sort_order
+    const order = reordered.map((t, i) => ({
+      document_type_id: t.document_type?.id,
+      sort_order: i,
+    })).filter(item => item.document_type_id)
+
+    try {
+      await fetch('/api/admin/templates/reorder', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+        body: JSON.stringify({ order }),
+      })
+    } catch {
+      // Revert on error
+      await fetchData()
+    }
+  }
 
   const saveSchema = async (templateId: string, schema: FormSchema) => {
     const res = await fetch(`/api/admin/templates/${templateId}`, {
@@ -119,14 +257,6 @@ export default function FormsPage() {
 
   const previewTemplate = templates.find(t => t.id === previewId)
 
-  // Unique document types for the select dropdown
-  const documentTypes = templates.reduce<{ id: string; name: string }[]>((acc, t) => {
-    if (t.document_type && !acc.find(d => d.id === t.document_type.id)) {
-      acc.push({ id: t.document_type.id, name: t.document_type.name })
-    }
-    return acc
-  }, [])
-
   if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64" /></div>
   }
@@ -159,7 +289,7 @@ export default function FormsPage() {
               <SelectValue placeholder="書類種別を選択" />
             </SelectTrigger>
             <SelectContent>
-              {documentTypes.map(dt => (
+              {allDocTypes.map(dt => (
                 <SelectItem key={dt.id} value={dt.id}>{dt.name}</SelectItem>
               ))}
             </SelectContent>
@@ -191,6 +321,7 @@ export default function FormsPage() {
           <table className="w-full">
             <thead className="bg-gray-50 text-xs text-gray-500">
               <tr>
+                <th className="w-8 p-3"></th>
                 <th className="text-left p-3">書類種別</th>
                 <th className="text-left p-3">バージョン</th>
                 <th className="text-left p-3">フィールド数</th>
@@ -199,44 +330,22 @@ export default function FormsPage() {
                 <th className="text-right p-3">操作</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
-              {templates.map(t => {
-                const fieldCount = (t.schema as Record<string, unknown[]>)?.fields?.length || 0
-                return (
-                  <tr key={t.id} className="hover:bg-gray-50">
-                    <td className="p-3 text-sm font-medium">{t.document_type?.name}</td>
-                    <td className="p-3 text-sm">v{t.version}</td>
-                    <td className="p-3 text-sm">{fieldCount}件</td>
-                    <td className="p-3">
-                      {t.is_current ? (
-                        <Badge className="bg-green-100 text-green-700">現行</Badge>
-                      ) : (
-                        <Badge variant="secondary">旧版</Badge>
-                      )}
-                    </td>
-                    <td className="p-3 text-sm text-gray-500">{formatDate(t.created_at)}</td>
-                    <td className="p-3 text-right">
-                      <div className="flex gap-1 justify-end">
-                        <Button variant="ghost" size="sm" onClick={() => setPreviewId(previewId === t.id ? null : t.id)}>
-                          {previewId === t.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setEditTemplate(t)}>
-                          <Pencil className="w-3 h-3" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setDeleteTarget(t)}
-                          className="text-gray-400 hover:text-red-600"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={templates.map(t => t.id)} strategy={verticalListSortingStrategy}>
+                <tbody className="divide-y">
+                  {templates.map(t => (
+                    <SortableTemplateRow
+                      key={t.id}
+                      t={t}
+                      previewId={previewId}
+                      onTogglePreview={(id) => setPreviewId(previewId === id ? null : id)}
+                      onEdit={setEditTemplate}
+                      onDelete={setDeleteTarget}
+                    />
+                  ))}
+                </tbody>
+              </SortableContext>
+            </DndContext>
           </table>
         </CardContent>
       </Card>

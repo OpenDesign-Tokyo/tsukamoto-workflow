@@ -50,7 +50,7 @@ export default function OrgPage() {
   // Dialog state
   const [showDeptDialog, setShowDeptDialog] = useState(false)
   const [editingDept, setEditingDept] = useState<Department | null>(null)
-  const [deptForm, setDeptForm] = useState({ name: '', code: '', parent_id: '', level: 0, sort_order: 0 })
+  const [deptForm, setDeptForm] = useState({ name: '', code: '', parent_id: '', level: 0 })
   const [deleteTarget, setDeleteTarget] = useState<Department | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -111,7 +111,6 @@ export default function OrgPage() {
       code: '',
       parent_id: parentId || '',
       level: parent ? parent.level + 1 : 0,
-      sort_order: 0,
     })
     setShowDeptDialog(true)
   }
@@ -123,7 +122,6 @@ export default function OrgPage() {
       code: dept.code || '',
       parent_id: dept.parent_id || '',
       level: dept.level,
-      sort_order: dept.sort_order,
     })
     setShowDeptDialog(true)
   }
@@ -234,7 +232,6 @@ export default function OrgPage() {
                 onEdit={openEditDept}
                 onAddChild={(id) => openAddDept(id)}
                 onDelete={setDeleteTarget}
-                isRoot
               />
             ))}
           </div>
@@ -315,10 +312,6 @@ export default function OrgPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label>表示順</Label>
-              <Input type="number" value={deptForm.sort_order} onChange={e => setDeptForm(f => ({ ...f, sort_order: parseInt(e.target.value) || 0 }))} />
-            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowDeptDialog(false)}>キャンセル</Button>
@@ -347,6 +340,18 @@ export default function OrgPage() {
 }
 
 // ============================================================================
+// Helper: recursive total member count (includes all descendants)
+// ============================================================================
+
+function getTotalMemberCount(node: DeptNode): number {
+  let count = node.members.length
+  for (const child of node.children) {
+    count += getTotalMemberCount(child)
+  }
+  return count
+}
+
+// ============================================================================
 // ORG CHART NODE - Graphical card-based tree node
 // ============================================================================
 
@@ -357,7 +362,6 @@ function OrgChartNode({
   onEdit,
   onAddChild,
   onDelete,
-  isRoot,
 }: {
   node: DeptNode
   selectedId?: string
@@ -365,12 +369,14 @@ function OrgChartNode({
   onEdit: (dept: Department) => void
   onAddChild: (parentId: string) => void
   onDelete: (dept: Department) => void
-  isRoot?: boolean
 }) {
   const [hover, setHover] = useState(false)
   const isSelected = selectedId === node.id
   const hasChildren = node.children.length > 0
-  const memberCount = node.members.length
+  const totalCount = getTotalMemberCount(node)
+
+  // Add button label: level 0 = 部署追加, level 1+ = 課追加
+  const addChildLabel = node.level < 1 ? '部署追加' : '課追加'
 
   // Color scheme based on hierarchy level
   const levelColors = [
@@ -399,12 +405,10 @@ function OrgChartNode({
           `}
         >
           <p className="font-bold text-sm leading-tight truncate">{node.name}</p>
-          {memberCount > 0 && (
-            <div className={`flex items-center justify-center gap-1 mt-1 text-xs ${node.level < 2 ? 'text-blue-100' : 'text-gray-400'}`}>
-              <Users className="w-3 h-3" />
-              <span>{memberCount}名</span>
-            </div>
-          )}
+          <div className={`flex items-center justify-center gap-1 mt-1 text-xs ${node.level < 2 ? 'text-blue-100' : 'text-gray-400'}`}>
+            <Users className="w-3 h-3" />
+            <span>{totalCount}名</span>
+          </div>
         </button>
 
         {/* Hover action buttons */}
@@ -413,7 +417,7 @@ function OrgChartNode({
             <button
               onClick={(e) => { e.stopPropagation(); onAddChild(node.id) }}
               className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center shadow-md hover:bg-green-600 transition-colors"
-              title="子部署追加"
+              title={addChildLabel}
             >
               <Plus className="w-3 h-3" />
             </button>
@@ -441,25 +445,18 @@ function OrgChartNode({
           {/* Vertical line down from parent */}
           <div className="w-px h-6 bg-blue-300" />
 
-          {/* Horizontal connector bar */}
-          {node.children.length > 1 && (
-            <div className="relative w-full flex justify-center">
-              <div
-                className="h-px bg-blue-300 absolute top-0"
-                style={{
-                  left: `calc(50% - ${(node.children.length - 1) * 50}%)`,
-                  right: `calc(50% - ${(node.children.length - 1) * 50}%)`,
-                  minWidth: `${(node.children.length - 1) * 180}px`,
-                  maxWidth: '100%',
-                }}
-              />
-            </div>
-          )}
-
-          {/* Children row */}
-          <div className="flex gap-6 items-start">
+          {/* Children row: each child draws its portion of the horizontal connector */}
+          <div className="flex items-start">
             {node.children.map((child, i) => (
-              <div key={child.id} className="flex flex-col items-center">
+              <div key={child.id} className="flex flex-col items-center relative px-3">
+                {/* Horizontal line - left half (all except first child) */}
+                {node.children.length > 1 && i > 0 && (
+                  <div className="absolute top-0 h-px bg-blue-300 left-0" style={{ right: '50%' }} />
+                )}
+                {/* Horizontal line - right half (all except last child) */}
+                {node.children.length > 1 && i < node.children.length - 1 && (
+                  <div className="absolute top-0 h-px bg-blue-300 right-0" style={{ left: '50%' }} />
+                )}
                 {/* Vertical line from horizontal bar to child */}
                 <div className="w-px h-6 bg-blue-300" />
                 <OrgChartNode
