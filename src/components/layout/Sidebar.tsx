@@ -38,7 +38,7 @@ export function Sidebar() {
   return (
     <aside className="w-60 bg-[#1e3a5f] text-white flex flex-col min-h-screen">
       <div className="p-4 border-b border-white/10">
-        <h1 className="text-lg font-bold">塚本ワークフロー</h1>
+        <h1 className="text-lg font-bold">ツカモトワークフロー</h1>
         <p className="text-xs text-white/60 mt-1">承認管理システム</p>
       </div>
 

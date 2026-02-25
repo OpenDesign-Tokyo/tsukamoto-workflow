@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "塚本ワークフロー",
+  title: "ツカモトワークフロー",
   description: "社内申請・承認ワークフローシステム",
 }
 
