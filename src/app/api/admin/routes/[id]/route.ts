@@ -46,15 +46,30 @@ export async function PUT(
 }
 
 export async function DELETE(
-  req: NextRequest,
+  _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
   const supabase = createAdminClient()
 
+  // Check if any active applications reference this route
+  const { count } = await supabase
+    .from('applications')
+    .select('*', { count: 'exact', head: true })
+    .eq('route_template_id', id)
+    .not('status', 'in', '("draft","withdrawn")')
+
+  if (count && count > 0) {
+    return NextResponse.json(
+      { error: `このルートは ${count} 件の進行中の申請で使用されているため削除できません` },
+      { status: 400 }
+    )
+  }
+
+  // Steps are deleted by ON DELETE CASCADE
   const { error } = await supabase
     .from('approval_route_templates')
-    .update({ is_active: false })
+    .delete()
     .eq('id', id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -177,8 +177,12 @@ function RoutesPageInner() {
       method: 'DELETE',
       headers: getDemoUserHeader(),
     })
-    if (!res.ok) { toast.error('削除に失敗しました'); return }
-    toast.success('ルートを無効化しました')
+    if (!res.ok) {
+      const data = await res.json()
+      toast.error(data.error || '削除に失敗しました')
+      return
+    }
+    toast.success('ルートを削除しました')
     setDeleteTarget(null)
     fetchData()
   }
@@ -347,12 +351,12 @@ function RoutesPageInner() {
       <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>ルートの無効化</AlertDialogTitle>
-            <AlertDialogDescription>「{deleteTarget?.name}」を無効化しますか？</AlertDialogDescription>
+            <AlertDialogTitle>ルートの削除</AlertDialogTitle>
+            <AlertDialogDescription>「{deleteTarget?.name}」を削除しますか？進行中の申請で使用されている場合は削除できません。</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={deleteRoute} className="bg-red-600 hover:bg-red-700">無効化</AlertDialogAction>
+            <AlertDialogAction onClick={deleteRoute} className="bg-red-600 hover:bg-red-700">削除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
