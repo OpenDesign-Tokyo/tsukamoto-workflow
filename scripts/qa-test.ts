@@ -435,7 +435,7 @@ async function run() {
         const notifications = await supabaseQuery('notifications',
           `select=*&application_id=eq.${submittedAppId}&order=sent_at.desc`)
         if (notifications.length >= 1) {
-          pass('3-10 通知生成', `${notifications.length}件の通知`, notifications.map((n: any) => `${n.type}: ${n.title}`).join('; '))
+          pass('3-10 通知生成', `${notifications.length}件の通知: ${notifications.map((n: any) => `${n.type}: ${n.title}`).join('; ')}`)
         } else {
           fail('3-10 通知生成', '通知が生成されていない')
         }

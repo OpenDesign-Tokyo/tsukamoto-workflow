@@ -6,19 +6,19 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogFooter,
 } from '@/components/ui/dialog'
-import { Pencil, Eye, EyeOff } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Pencil, Eye, EyeOff, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils/format'
 import { FormRenderer } from '@/components/forms/FormRenderer'
+import { TemplateEditor } from '@/components/admin/TemplateEditor'
+import { ExcelTemplateImporter } from '@/components/admin/ExcelTemplateImporter'
 import type { FormSchema } from '@/lib/types/database'
 
 interface FormTemplateRow {
@@ -34,9 +34,10 @@ export default function FormsPage() {
   const [templates, setTemplates] = useState<FormTemplateRow[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [previewId, setPreviewId] = useState<string | null>(null)
-  const [editId, setEditId] = useState<string | null>(null)
-  const [schemaText, setSchemaText] = useState('')
-  const [schemaError, setSchemaError] = useState('')
+  const [editTemplate, setEditTemplate] = useState<FormTemplateRow | null>(null)
+  const [showImportDialog, setShowImportDialog] = useState(false)
+  const [importedSchema, setImportedSchema] = useState<FormSchema | null>(null)
+  const [selectedDocTypeId, setSelectedDocTypeId] = useState<string>('')
 
   const fetchData = useCallback(async () => {
     const res = await fetch('/api/admin/templates', { headers: getDemoUserHeader() })
@@ -46,42 +47,112 @@ export default function FormsPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  const openEdit = (t: FormTemplateRow) => {
-    setEditId(t.id)
-    setSchemaText(JSON.stringify(t.schema, null, 2))
-    setSchemaError('')
+  const saveSchema = async (templateId: string, schema: FormSchema) => {
+    const res = await fetch(`/api/admin/templates/${templateId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+      body: JSON.stringify({ schema }),
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.error || '保存に失敗しました')
+    }
+    await fetchData()
   }
 
-  const saveSchema = async () => {
-    try {
-      const parsed = JSON.parse(schemaText)
-      const res = await fetch(`/api/admin/templates/${editId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
-        body: JSON.stringify({ schema: parsed }),
-      })
-      if (!res.ok) {
-        const data = await res.json()
-        toast.error(data.error || '保存に失敗しました')
-        return
-      }
-      toast.success('テンプレートを更新しました')
-      setEditId(null)
-      fetchData()
-    } catch {
-      setSchemaError('無効なJSON形式です')
+  const createFromExcel = async (schema: FormSchema) => {
+    if (!selectedDocTypeId) {
+      toast.error('書類種別を選択してください')
+      return
     }
+    const res = await fetch('/api/admin/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+      body: JSON.stringify({ document_type_id: selectedDocTypeId, schema }),
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.error || '作成に失敗しました')
+    }
+    toast.success('新しいテンプレートを作成しました')
+    setImportedSchema(null)
+    setSelectedDocTypeId('')
+    await fetchData()
+  }
+
+  const handleExcelImport = (schema: FormSchema) => {
+    setImportedSchema(schema)
+    setShowImportDialog(false)
   }
 
   const previewTemplate = templates.find(t => t.id === previewId)
+
+  // Unique document types for the select dropdown
+  const documentTypes = templates.reduce<{ id: string; name: string }[]>((acc, t) => {
+    if (t.document_type && !acc.find(d => d.id === t.document_type.id)) {
+      acc.push({ id: t.document_type.id, name: t.document_type.name })
+    }
+    return acc
+  }, [])
 
   if (isLoading) {
     return <div className="space-y-4"><Skeleton className="h-8 w-48" /><Skeleton className="h-64" /></div>
   }
 
+  // Full-page editor mode (editing existing template)
+  if (editTemplate) {
+    return (
+      <TemplateEditor
+        initialSchema={editTemplate.schema as unknown as FormSchema}
+        templateId={editTemplate.id}
+        templateName={editTemplate.document_type?.name || 'テンプレート'}
+        onSave={schema => saveSchema(editTemplate.id, schema)}
+        onCancel={() => setEditTemplate(null)}
+      />
+    )
+  }
+
+  // Full-page editor mode (new template from Excel import)
+  if (importedSchema) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <Upload className="w-5 h-5 text-blue-600 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-blue-800">Excelインポートから新規テンプレートを作成</p>
+            <p className="text-xs text-blue-600">保存先の書類種別を選択してください</p>
+          </div>
+          <Select value={selectedDocTypeId} onValueChange={setSelectedDocTypeId}>
+            <SelectTrigger className="w-60 h-9">
+              <SelectValue placeholder="書類種別を選択" />
+            </SelectTrigger>
+            <SelectContent>
+              {documentTypes.map(dt => (
+                <SelectItem key={dt.id} value={dt.id}>{dt.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <TemplateEditor
+          initialSchema={importedSchema}
+          templateId=""
+          templateName="新規テンプレート（Excelインポート）"
+          onSave={schema => createFromExcel(schema)}
+          onCancel={() => { setImportedSchema(null); setSelectedDocTypeId('') }}
+        />
+      </div>
+    )
+  }
+
+  // Template list view
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">フォームテンプレート管理</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">フォームテンプレート管理</h1>
+        <Button variant="outline" onClick={() => setShowImportDialog(true)}>
+          <Upload className="w-4 h-4 mr-1.5" />Excelからインポート
+        </Button>
+      </div>
 
       <Card>
         <CardContent className="p-0">
@@ -98,7 +169,7 @@ export default function FormsPage() {
             </thead>
             <tbody className="divide-y">
               {templates.map(t => {
-                const fieldCount = (t.schema as any)?.fields?.length || 0
+                const fieldCount = (t.schema as Record<string, unknown[]>)?.fields?.length || 0
                 return (
                   <tr key={t.id} className="hover:bg-gray-50">
                     <td className="p-3 text-sm font-medium">{t.document_type?.name}</td>
@@ -117,7 +188,7 @@ export default function FormsPage() {
                         <Button variant="ghost" size="sm" onClick={() => setPreviewId(previewId === t.id ? null : t.id)}>
                           {previewId === t.id ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(t)}>
+                        <Button variant="ghost" size="sm" onClick={() => setEditTemplate(t)}>
                           <Pencil className="w-3 h-3" />
                         </Button>
                       </div>
@@ -146,26 +217,13 @@ export default function FormsPage() {
         </Card>
       )}
 
-      {/* Edit Schema Dialog */}
-      <Dialog open={!!editId} onOpenChange={() => setEditId(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh]">
+      {/* Excel Import Dialog */}
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>テンプレートスキーマ編集</DialogTitle>
+            <DialogTitle>Excelからテンプレートをインポート</DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label>JSON Schema</Label>
-            <Textarea
-              value={schemaText}
-              onChange={e => { setSchemaText(e.target.value); setSchemaError('') }}
-              rows={20}
-              className="font-mono text-xs"
-            />
-            {schemaError && <p className="text-sm text-red-500">{schemaError}</p>}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditId(null)}>キャンセル</Button>
-            <Button onClick={saveSchema}>保存</Button>
-          </DialogFooter>
+          <ExcelTemplateImporter onImport={handleExcelImport} />
         </DialogContent>
       </Dialog>
     </div>
