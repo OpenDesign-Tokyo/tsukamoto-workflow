@@ -204,7 +204,7 @@ export default function ApplicationDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {schema && (
+          {schema && application.status === 'approved' && (
             <Button
               variant="outline"
               size="sm"
