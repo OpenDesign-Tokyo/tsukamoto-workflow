@@ -36,15 +36,10 @@ export async function sendTeamsNotification(
       totalSteps: message.totalSteps,
     })
 
+    // Power Automate DM flow: recipientEmail + card
     const payload = {
-      type: 'message',
-      attachments: [
-        {
-          contentType: 'application/vnd.microsoft.card.adaptive',
-          contentUrl: null,
-          content: card,
-        },
-      ],
+      recipientEmail,
+      card,
     }
 
     const response = await fetch(process.env.TEAMS_WEBHOOK_URL!, {
