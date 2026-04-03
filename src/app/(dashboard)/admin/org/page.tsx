@@ -252,17 +252,25 @@ export default function OrgPage() {
             className="p-8 min-w-fit"
             style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
           >
-            {tree.map(root => (
-              <OrgChartNode
-                key={root.id}
-                node={root}
-                selectedId={selectedDept?.id}
-                onSelect={setSelectedDept}
-                onEdit={openEditDept}
-                onAddChild={(id) => openAddDept(id)}
-                onDelete={setDeleteTarget}
-              />
-            ))}
+            <div className="flex items-start gap-12">
+              {tree.map((root, i) => (
+                <div key={root.id} className="flex items-start gap-12">
+                  {i > 0 && (
+                    <div className="self-stretch flex items-center">
+                      <div className="w-px h-full min-h-[200px] bg-gray-300 border-l border-dashed border-gray-300" />
+                    </div>
+                  )}
+                  <OrgChartNode
+                    node={root}
+                    selectedId={selectedDept?.id}
+                    onSelect={setSelectedDept}
+                    onEdit={openEditDept}
+                    onAddChild={(id) => openAddDept(id)}
+                    onDelete={setDeleteTarget}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </Card>
