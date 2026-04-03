@@ -59,6 +59,17 @@ function LoginForm() {
     }
   }
 
+  const handleSSOLogin = async () => {
+    setIsLoading(true)
+    const supabase = createClient()
+    await supabase.auth.signInWithOAuth({
+      provider: 'azure',
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
+    })
+  }
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#1e3a5f] to-[#2d5a8e] px-4">
       <div className="w-full max-w-md">
@@ -73,15 +84,38 @@ function LoginForm() {
             </p>
           </div>
 
-          {/* Login Form */}
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div>
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-gray-700 mb-1.5"
-              >
-                メールアドレス
-              </label>
+          {error && (
+            <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-lg mb-5">
+              {error}
+            </div>
+          )}
+
+          {/* Microsoft 365 SSO - Primary Login */}
+          <button
+            type="button"
+            onClick={handleSSOLogin}
+            disabled={isLoading}
+            className="w-full py-3.5 bg-[#1e3a5f] text-white rounded-lg font-medium hover:bg-[#2d5a8e] disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm flex items-center justify-center gap-3"
+          >
+            <svg className="w-5 h-5" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+              <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+              <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+            </svg>
+            {isLoading ? 'ログイン中...' : 'Microsoft 365 でログイン'}
+          </button>
+
+          <p className="text-center text-xs text-gray-400 mt-3">
+            会社の Microsoft 365 アカウントでログインしてください
+          </p>
+
+          {/* Demo email login - collapsible */}
+          <details className="mt-8">
+            <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-500 text-center">
+              メールアドレスで直接ログイン（デモ用）
+            </summary>
+            <form onSubmit={handleLogin} className="mt-4 space-y-4">
               <input
                 id="email"
                 type="email"
@@ -89,62 +123,18 @@ function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="example@tsukamoto.co.jp"
                 required
-                autoFocus
                 autoComplete="email"
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#1e3a5f] focus:border-[#1e3a5f] outline-none transition-colors text-sm"
               />
-            </div>
-
-            {error && (
-              <div className="bg-red-50 text-red-600 text-sm px-4 py-3 rounded-lg">
-                {error}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={isLoading || !email}
-              className="w-full py-3 bg-[#1e3a5f] text-white rounded-lg font-medium hover:bg-[#2d5a8e] disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
-            >
-              {isLoading ? 'ログイン中...' : 'ログイン'}
-            </button>
-          </form>
-
-          {/* SSO Section (for future Entra ID) */}
-          {process.env.NEXT_PUBLIC_AZURE_SSO_ENABLED === 'true' && (
-            <>
-              <div className="relative my-6">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-gray-200" />
-                </div>
-                <div className="relative flex justify-center text-xs">
-                  <span className="bg-white px-3 text-gray-400">または</span>
-                </div>
-              </div>
-
               <button
-                type="button"
-                onClick={async () => {
-                  const supabase = createClient()
-                  await supabase.auth.signInWithOAuth({
-                    provider: 'azure',
-                    options: {
-                      redirectTo: `${window.location.origin}/auth/callback`,
-                    },
-                  })
-                }}
-                className="w-full py-3 border border-gray-300 rounded-lg font-medium hover:bg-gray-50 transition-colors text-sm flex items-center justify-center gap-2"
+                type="submit"
+                disabled={isLoading || !email}
+                className="w-full py-3 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm"
               >
-                <svg className="w-5 h-5" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
-                  <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-                  <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-                  <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-                  <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-                </svg>
-                Microsoft アカウントでログイン
+                {isLoading ? 'ログイン中...' : 'ログイン'}
               </button>
-            </>
-          )}
+            </form>
+          </details>
         </div>
 
         <p className="text-center text-xs text-white/60 mt-6">
