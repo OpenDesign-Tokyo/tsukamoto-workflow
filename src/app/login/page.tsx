@@ -1,15 +1,30 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { setStoredUserId } from '@/lib/auth/demo-auth'
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+
+  // Handle SSO callback redirect
+  useEffect(() => {
+    const ssoEid = searchParams.get('sso_eid')
+    if (ssoEid) {
+      setStoredUserId(ssoEid)
+      router.replace('/')
+      return
+    }
+    const ssoError = searchParams.get('error')
+    if (ssoError) {
+      setError(ssoError)
+    }
+  }, [searchParams, router])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -137,5 +152,13 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   )
 }
