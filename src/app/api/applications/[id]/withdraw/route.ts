@@ -18,7 +18,7 @@ export async function POST(
   // Get application
   const { data: app } = await supabase
     .from('applications')
-    .select('*, applicant:employees!applicant_id(*)')
+    .select('*, applicant:employees!applicant_id(*), document_type:document_types(name)')
     .eq('id', id)
     .maybeSingle()
 
@@ -34,6 +34,9 @@ export async function POST(
   if (app.status !== 'submitted' && app.status !== 'in_approval') {
     return NextResponse.json({ error: 'Cannot withdraw this application' }, { status: 400 })
   }
+
+  const applicantName = (app.applicant as { name: string }).name
+  const documentTypeName = (app.document_type as { name: string } | null)?.name
 
   // Get current pending approver to notify
   const { data: pendingRecords } = await supabase
@@ -79,8 +82,13 @@ export async function POST(
         applicationId: id,
         type: 'withdrawn',
         title: `取下げ: ${app.title}`,
-        body: `${(app.applicant as { name: string }).name}さんが「${app.title}」を取り下げました。`,
+        body: `${applicantName}さんが「${app.title}」を取り下げました。`,
         actionUrl: `/applications/${id}`,
+        applicationNumber: app.application_number,
+        applicantName,
+        documentTypeName,
+        currentStep: app.current_step,
+        totalSteps: app.total_steps,
       })
     }
   }

@@ -8,6 +8,12 @@ export async function POST(req: NextRequest) {
     title: body.title,
     body: body.body,
     actionUrl: body.actionUrl,
+    type: body.type,
+    applicationNumber: body.applicationNumber,
+    applicantName: body.applicantName,
+    documentTypeName: body.documentTypeName,
+    currentStep: body.currentStep,
+    totalSteps: body.totalSteps,
   })
 
   return NextResponse.json(result)

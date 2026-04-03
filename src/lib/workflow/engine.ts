@@ -17,13 +17,16 @@ export async function submitApplication(applicationId: string): Promise<Workflow
   // Get the application
   const { data: application, error: appError } = await supabase
     .from('applications')
-    .select('*, applicant:employees!applicant_id(*)')
+    .select('*, applicant:employees!applicant_id(*), document_type:document_types(name)')
     .eq('id', applicationId)
     .maybeSingle()
 
   if (appError || !application) {
     return { success: false, applicationId, applicationNumber: '', error: 'Application not found' }
   }
+
+  const applicantName = (application.applicant as { name: string }).name
+  const documentTypeName = (application.document_type as { name: string } | null)?.name
 
   // Get route steps
   const { data: steps } = await supabase
@@ -88,8 +91,13 @@ export async function submitApplication(applicationId: string): Promise<Workflow
     applicationId,
     type: 'approval_request',
     title: `承認依頼: ${application.title}`,
-    body: `${(application.applicant as { name: string }).name}さんから「${application.title}」の承認依頼があります。`,
+    body: `${applicantName}さんから「${application.title}」の承認依頼があります。`,
     actionUrl: `/applications/${applicationId}`,
+    applicationNumber: application.application_number,
+    applicantName,
+    documentTypeName,
+    currentStep: 1,
+    totalSteps: steps.length,
   })
 
   return {
@@ -122,13 +130,16 @@ export async function approveApplication(
   // Get the application
   const { data: application } = await supabase
     .from('applications')
-    .select('*, applicant:employees!applicant_id(*)')
+    .select('*, applicant:employees!applicant_id(*), document_type:document_types(name)')
     .eq('id', applicationId)
     .maybeSingle()
 
   if (!application) {
     return { success: false, isCompleted: false, error: 'Application not found' }
   }
+
+  const applicantName = (application.applicant as { name: string }).name
+  const documentTypeName = (application.document_type as { name: string } | null)?.name
 
   // Update current approval record
   await supabase
@@ -163,6 +174,11 @@ export async function approveApplication(
       title: `決裁完了: ${application.title}`,
       body: `「${application.title}」が決裁されました。`,
       actionUrl: `/applications/${applicationId}`,
+      applicationNumber: application.application_number,
+      applicantName,
+      documentTypeName,
+      currentStep: application.total_steps,
+      totalSteps: application.total_steps,
     })
 
     return { success: true, isCompleted: true }
@@ -231,6 +247,11 @@ export async function approveApplication(
     title: `承認依頼: ${application.title}`,
     body: `「${application.title}」の承認をお願いします（ステップ ${nextStepOrder}/${application.total_steps}）`,
     actionUrl: `/applications/${applicationId}`,
+    applicationNumber: application.application_number,
+    applicantName,
+    documentTypeName,
+    currentStep: nextStepOrder,
+    totalSteps: application.total_steps,
   })
 
   return {
@@ -259,13 +280,16 @@ export async function rejectApplication(
 
   const { data: application } = await supabase
     .from('applications')
-    .select('*, applicant:employees!applicant_id(*)')
+    .select('*, applicant:employees!applicant_id(*), document_type:document_types(name)')
     .eq('id', applicationId)
     .maybeSingle()
 
   if (!application) {
     return { success: false, error: 'Application not found' }
   }
+
+  const applicantName = (application.applicant as { name: string }).name
+  const documentTypeName = (application.document_type as { name: string } | null)?.name
 
   // Update approval record
   await supabase
@@ -296,6 +320,11 @@ export async function rejectApplication(
     title: `差戻し: ${application.title}`,
     body: `「${application.title}」が差し戻されました。コメント: ${comment}`,
     actionUrl: `/applications/${applicationId}`,
+    applicationNumber: application.application_number,
+    applicantName,
+    documentTypeName,
+    currentStep: application.current_step,
+    totalSteps: application.total_steps,
   })
 
   return { success: true }
