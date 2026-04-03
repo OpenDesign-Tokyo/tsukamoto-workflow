@@ -1,41 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
-import { DemoAuthContext, getStoredUserId, setStoredUserId } from './demo-auth'
+import { DemoAuthContext, getStoredUserId, setStoredUserId, clearStoredUserId } from './demo-auth'
 import { createClient } from '@/lib/supabase/client'
 import type { EmployeeWithAssignment } from '@/lib/types/database'
 
 export function DemoAuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<EmployeeWithAssignment | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-
-  const loadDefaultUser = useCallback(async () => {
-    const supabase = createClient()
-    const { data } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('email', 'ta-sato@tsukamoto.co.jp')
-      .maybeSingle()
-
-    if (data) {
-      setStoredUserId(data.id)
-      return data.id
-    }
-    // Fallback: pick first active employee
-    const { data: first } = await supabase
-      .from('employees')
-      .select('id')
-      .eq('is_active', true)
-      .order('employee_number')
-      .limit(1)
-      .maybeSingle()
-
-    if (first) {
-      setStoredUserId(first.id)
-      return first.id
-    }
-    return null
-  }, [])
 
   const fetchUser = useCallback(async (employeeId: string) => {
     const supabase = createClient()
@@ -46,28 +18,8 @@ export function DemoAuthProvider({ children }: { children: ReactNode }) {
       .maybeSingle()
 
     if (!employee) {
-      // Stored ID is stale (e.g. old demo user) — reset to default
-      localStorage.removeItem('current_employee_id')
-      const defaultId = await loadDefaultUser()
-      if (defaultId) {
-        const { data: fallback } = await supabase
-          .from('employees')
-          .select('*')
-          .eq('id', defaultId)
-          .maybeSingle()
-        if (fallback) {
-          const { data: assignment } = await supabase
-            .from('employee_assignments')
-            .select(`*, department:departments(*), position:positions(*)`)
-            .eq('employee_id', defaultId)
-            .eq('is_primary', true)
-            .eq('is_active', true)
-            .maybeSingle()
-          setCurrentUser({ ...fallback, assignment: assignment || undefined })
-          setIsLoading(false)
-          return
-        }
-      }
+      // Stored ID is stale — clear and leave unauthenticated
+      clearStoredUserId()
       setCurrentUser(null)
       setIsLoading(false)
       return
@@ -90,22 +42,17 @@ export function DemoAuthProvider({ children }: { children: ReactNode }) {
       assignment: assignments || undefined,
     })
     setIsLoading(false)
-  }, [loadDefaultUser])
+  }, [])
 
   useEffect(() => {
     const stored = getStoredUserId()
     if (stored) {
       fetchUser(stored)
     } else {
-      loadDefaultUser().then((id) => {
-        if (id) {
-          fetchUser(id)
-        } else {
-          setIsLoading(false)
-        }
-      })
+      // No stored user — stay unauthenticated (login page will handle)
+      setIsLoading(false)
     }
-  }, [fetchUser, loadDefaultUser])
+  }, [fetchUser])
 
   const handleSetUserId = useCallback((id: string) => {
     setStoredUserId(id)
@@ -113,8 +60,18 @@ export function DemoAuthProvider({ children }: { children: ReactNode }) {
     fetchUser(id)
   }, [fetchUser])
 
+  const handleLogout = useCallback(() => {
+    clearStoredUserId()
+    setCurrentUser(null)
+  }, [])
+
   return (
-    <DemoAuthContext.Provider value={{ currentUser, setCurrentUserId: handleSetUserId, isLoading }}>
+    <DemoAuthContext.Provider value={{
+      currentUser,
+      setCurrentUserId: handleSetUserId,
+      logout: handleLogout,
+      isLoading,
+    }}>
       {children}
     </DemoAuthContext.Provider>
   )

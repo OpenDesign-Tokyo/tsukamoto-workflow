@@ -8,12 +8,14 @@ const STORAGE_KEY = 'current_employee_id'
 export interface DemoAuthContextType {
   currentUser: EmployeeWithAssignment | null
   setCurrentUserId: (id: string) => void
+  logout: () => void
   isLoading: boolean
 }
 
 export const DemoAuthContext = createContext<DemoAuthContextType>({
   currentUser: null,
   setCurrentUserId: () => {},
+  logout: () => {},
   isLoading: true,
 })
 
@@ -29,6 +31,11 @@ export function getStoredUserId(): string | null {
 export function setStoredUserId(id: string) {
   if (typeof window === 'undefined') return
   localStorage.setItem(STORAGE_KEY, id)
+}
+
+export function clearStoredUserId() {
+  if (typeof window === 'undefined') return
+  localStorage.removeItem(STORAGE_KEY)
 }
 
 export function getDemoUserHeader(): Record<string, string> {
