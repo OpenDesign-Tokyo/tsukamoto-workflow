@@ -13,19 +13,12 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { ChevronDown } from 'lucide-react'
-import type { Employee } from '@/lib/types/database'
-
-interface DemoUser extends Employee {
-  role_label?: string
-}
-
-const ROLE_LABELS: Record<string, string> = {
-  'tanaka@tsukamoto-demo.com': '営業1課 一般社員（申請者）',
-  'sato@tsukamoto-demo.com': '営業1課 課長（第1承認者）',
-  'suzuki@tsukamoto-demo.com': '営業部 部長（第2承認者）',
-  'yamada@tsukamoto-demo.com': 'ユニフォーム事業部 事業部長（最終承認者）',
-  'takahashi@tsukamoto-demo.com': '営業2課 課長',
-  'admin@tsukamoto-demo.com': '業務管理部（システム管理者）',
+interface DemoUser {
+  id: string
+  name: string
+  email: string
+  is_admin: boolean
+  role_label: string
 }
 
 export function UserSwitcher() {
@@ -37,15 +30,33 @@ export function UserSwitcher() {
       const supabase = createClient()
       const { data } = await supabase
         .from('employees')
-        .select('*')
+        .select(`
+          id, name, email, is_admin,
+          employee_assignments!inner(
+            is_primary,
+            department:departments(name),
+            position:positions(name)
+          )
+        `)
         .eq('is_active', true)
+        .eq('employee_assignments.is_primary', true)
         .order('employee_number')
 
       if (data) {
-        setUsers(data.map(u => ({
-          ...u,
-          role_label: ROLE_LABELS[u.email] || '',
-        })))
+        setUsers(data.map((u: Record<string, unknown>) => {
+          const assignment = Array.isArray(u.employee_assignments)
+            ? u.employee_assignments[0]
+            : u.employee_assignments
+          const dept = (assignment as Record<string, unknown>)?.department as Record<string, string> | null
+          const pos = (assignment as Record<string, unknown>)?.position as Record<string, string> | null
+          return {
+            id: u.id as string,
+            name: u.name as string,
+            email: u.email as string,
+            is_admin: u.is_admin as boolean,
+            role_label: `${dept?.name || ''} ${pos?.name || ''}${u.is_admin ? '（管理者）' : ''}`.trim(),
+          }
+        }))
       }
     }
     fetchUsers()
@@ -71,9 +82,9 @@ export function UserSwitcher() {
         </div>
         <ChevronDown className="w-4 h-4 text-gray-400" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
+      <DropdownMenuContent align="end" className="w-72 max-h-[70vh] overflow-y-auto">
         <DropdownMenuLabel className="text-xs text-gray-500">
-          デモ用ユーザー切替
+          ユーザー切替（{users.length}名）
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {users.map((user) => (

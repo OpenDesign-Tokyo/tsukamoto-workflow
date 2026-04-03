@@ -52,7 +52,7 @@ export function DemoAuthProvider({ children }: { children: ReactNode }) {
       supabase
         .from('employees')
         .select('id')
-        .eq('email', 'tanaka@tsukamoto-demo.com')
+        .eq('email', 'ta-sato@tsukamoto.co.jp')
         .maybeSingle()
         .then(({ data }) => {
           if (data) {
