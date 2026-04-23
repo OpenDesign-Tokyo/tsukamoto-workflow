@@ -105,9 +105,9 @@ export default function EditApplicationPage() {
     )
   }
 
-  // Only editable if draft or rejected and user is applicant
+  // Only editable if draft or rejected and user is applicant or proxy applicant
   const canEdit = (application.status === 'draft' || application.status === 'rejected') &&
-    application.applicant_id === currentUser?.id
+    (application.applicant_id === currentUser?.id || application.proxy_applicant_id === currentUser?.id)
 
   if (!canEdit) {
     return (

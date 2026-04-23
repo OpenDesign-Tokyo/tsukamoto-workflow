@@ -187,8 +187,10 @@ export default function ApplicationDetailPage() {
     (r: any) => r.approver_id === currentUser?.id && r.action === 'pending'
   )
   const isApplicant = application.applicant_id === currentUser?.id
-  const canEdit = isApplicant && (application.status === 'draft' || application.status === 'rejected')
-  const canWithdraw = isApplicant && (application.status === 'submitted' || application.status === 'in_approval')
+  const isProxyApplicant = application.proxy_applicant_id === currentUser?.id
+  const isApplicantOrProxy = isApplicant || isProxyApplicant
+  const canEdit = isApplicantOrProxy && (application.status === 'draft' || application.status === 'rejected')
+  const canWithdraw = isApplicantOrProxy && (application.status === 'submitted' || application.status === 'in_approval')
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
@@ -254,7 +256,12 @@ export default function ApplicationDetailPage() {
               <User className="w-4 h-4 text-gray-400" />
               <div>
                 <p className="text-xs text-gray-500">申請者</p>
-                <p>{application.applicant?.name}</p>
+                <p>
+                  {application.applicant?.name}
+                  {application.proxy_applicant && (
+                    <span className="text-xs text-orange-500 ml-1">（代理: {application.proxy_applicant.name}）</span>
+                  )}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -317,7 +324,7 @@ export default function ApplicationDetailPage() {
           )}
 
           {/* Applicant actions for rejected */}
-          {isApplicant && application.status === 'rejected' && (
+          {isApplicantOrProxy && application.status === 'rejected' && (
             <Card>
               <CardContent className="p-4">
                 <p className="text-sm text-gray-500 mb-3">差戻されました。修正して再申請できます。</p>
@@ -329,7 +336,7 @@ export default function ApplicationDetailPage() {
           )}
 
           {/* Draft actions */}
-          {isApplicant && application.status === 'draft' && (
+          {isApplicantOrProxy && application.status === 'draft' && (
             <Card>
               <CardContent className="p-4">
                 <p className="text-sm text-gray-500 mb-3">下書き状態です。編集して申請できます。</p>

@@ -13,12 +13,13 @@ export async function GET(req: NextRequest) {
     .select(`
       *,
       document_type:document_types(*),
-      applicant:employees!applicant_id(*)
+      applicant:employees!applicant_id(*),
+      proxy_applicant:employees!proxy_applicant_id(*)
     `)
     .order('created_at', { ascending: false })
 
   if (userId) {
-    query = query.eq('applicant_id', userId)
+    query = query.or(`applicant_id.eq.${userId},proxy_applicant_id.eq.${userId}`)
   }
 
   const { data, error } = await query
@@ -59,13 +60,40 @@ export async function POST(req: NextRequest) {
     .select('*', { count: 'exact', head: true })
     .eq('route_template_id', routeTemplate.id)
 
+  // Proxy submission: validate proxy permission if applicant_id differs from current user
+  let applicantId = userId
+  let proxyApplicantId: string | null = null
+
+  if (body.applicant_id && body.applicant_id !== userId) {
+    const today = new Date().toISOString().split('T')[0]
+    const { data: proxySetting } = await supabase
+      .from('proxy_settings')
+      .select('id')
+      .eq('proxy_id', userId)
+      .eq('principal_id', body.applicant_id)
+      .eq('is_active', true)
+      .lte('valid_from', today)
+      .gte('valid_until', today)
+      .or(`document_type_id.eq.${body.document_type_id},document_type_id.is.null`)
+      .limit(1)
+      .maybeSingle()
+
+    if (!proxySetting) {
+      return NextResponse.json({ error: '代理申請の権限がありません' }, { status: 403 })
+    }
+
+    applicantId = body.applicant_id
+    proxyApplicantId = userId
+  }
+
   const { data: application, error } = await supabase
     .from('applications')
     .insert({
       document_type_id: body.document_type_id,
       form_template_id: body.form_template_id,
       route_template_id: routeTemplate.id,
-      applicant_id: userId,
+      applicant_id: applicantId,
+      proxy_applicant_id: proxyApplicantId,
       form_data: body.form_data,
       title: body.title,
       status: body.submit ? 'submitted' : 'draft',
@@ -81,7 +109,7 @@ export async function POST(req: NextRequest) {
     action: body.submit ? 'application.submit' : 'application.create',
     targetType: 'application',
     targetId: application.id,
-    metadata: { title: body.title, documentTypeId: body.document_type_id },
+    metadata: { title: body.title, documentTypeId: body.document_type_id, proxyApplicantId: proxyApplicantId },
   })
 
   // If submitting, start workflow

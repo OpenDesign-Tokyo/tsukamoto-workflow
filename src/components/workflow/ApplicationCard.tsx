@@ -27,6 +27,9 @@ export function ApplicationCard({ application }: Props) {
               <p className="font-medium mt-1 truncate">{application.title}</p>
               <p className="text-sm text-gray-500 mt-1">
                 {application.document_type?.name} | {application.applicant?.name}
+                {application.proxy_applicant_id && (
+                  <span className="ml-1 text-xs text-orange-500 font-medium">(代理申請)</span>
+                )}
               </p>
             </div>
             <StatusBadge status={application.status as ApplicationStatus} />

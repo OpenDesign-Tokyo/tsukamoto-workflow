@@ -229,5 +229,6 @@ export interface EmployeeWithAssignment extends Employee {
 export interface ApplicationWithDetails extends Application {
   document_type: DocumentType
   applicant: Employee
+  proxy_applicant?: Employee | null
   approval_records: (ApprovalRecord & { approver: Employee })[]
 }

@@ -18,6 +18,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Save, Send, ArrowLeft, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DocumentType, FormTemplate, FormSchema } from '@/lib/types/database'
@@ -37,6 +44,8 @@ export default function NewApplicationFormPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+  const [principals, setPrincipals] = useState<{ id: string; name: string; email: string }[]>([])
+  const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -79,6 +88,29 @@ export default function NewApplicationFormPage() {
     fetchData()
   }, [typeId])
 
+  // Fetch principals for proxy application
+  useEffect(() => {
+    if (!docType || !currentUser) return
+    const fetchPrincipals = async () => {
+      try {
+        const res = await fetch(`/api/proxy/principals?document_type_id=${docType.id}`, {
+          headers: getDemoUserHeader(),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          setPrincipals(data)
+        }
+      } catch {
+        // ignore
+      }
+    }
+    fetchPrincipals()
+  }, [docType, currentUser])
+
+  const applicantName = selectedApplicantId
+    ? principals.find(p => p.id === selectedApplicantId)?.name
+    : currentUser?.name
+
   const handleSubmit = async (isDraft: boolean) => {
     if (!template || !docType || !currentUser) return
 
@@ -108,8 +140,9 @@ export default function NewApplicationFormPage() {
           document_type_id: docType.id,
           form_template_id: template.id,
           form_data: formData,
-          title: `${docType.name} - ${currentUser.name}`,
+          title: `${docType.name} - ${applicantName}`,
           submit: !isDraft,
+          ...(selectedApplicantId ? { applicant_id: selectedApplicantId } : {}),
         }),
       })
 
@@ -164,7 +197,27 @@ export default function NewApplicationFormPage() {
         </Button>
         <div>
           <h1 className="text-2xl font-bold">{docType.name}</h1>
-          <p className="text-sm text-gray-500">申請者: {currentUser?.name}</p>
+          {principals.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">申請者:</span>
+              <Select
+                value={selectedApplicantId || '_self'}
+                onValueChange={(v) => setSelectedApplicantId(v === '_self' ? null : v)}
+              >
+                <SelectTrigger className="w-48 h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="_self">{currentUser?.name}（本人）</SelectItem>
+                  {principals.map(p => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}（代理）</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">申請者: {currentUser?.name}</p>
+          )}
         </div>
       </div>
 

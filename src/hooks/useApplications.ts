@@ -28,7 +28,7 @@ export function useApplications(
         document_type:document_types(*),
         applicant:employees!applicant_id(*)
       `, { count: 'exact' })
-      .eq('applicant_id', applicantId)
+      .or(`applicant_id.eq.${applicantId},proxy_applicant_id.eq.${applicantId}`)
       .order('created_at', { ascending: false })
 
     if (statusFilter !== 'all') {

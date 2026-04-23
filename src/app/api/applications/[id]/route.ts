@@ -17,6 +17,7 @@ export async function GET(
       document_type:document_types(*),
       form_template:form_templates(*),
       applicant:employees!applicant_id(*),
+      proxy_applicant:employees!proxy_applicant_id(*),
       approval_records(
         *,
         approver:employees!approver_id(*)
@@ -52,7 +53,7 @@ export async function PUT(
   // Check application exists and is editable
   const { data: app } = await supabase
     .from('applications')
-    .select('id, status, applicant_id, document_type_id')
+    .select('id, status, applicant_id, proxy_applicant_id, document_type_id')
     .eq('id', id)
     .maybeSingle()
 
@@ -60,7 +61,7 @@ export async function PUT(
     return NextResponse.json({ error: 'Application not found' }, { status: 404 })
   }
 
-  if (app.applicant_id !== userId) {
+  if (app.applicant_id !== userId && app.proxy_applicant_id !== userId) {
     return NextResponse.json({ error: 'Not authorized' }, { status: 403 })
   }
 

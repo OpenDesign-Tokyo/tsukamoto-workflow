@@ -14,6 +14,7 @@ import {
   Route,
   FileSpreadsheet,
   UserCheck,
+  Cloud,
   Menu,
   X,
 } from 'lucide-react'
@@ -33,7 +34,8 @@ const adminNav = [
   { label: 'ユーザー', href: '/admin/users', icon: Users },
   { label: '承認ルート', href: '/admin/routes', icon: Route },
   { label: 'フォーム', href: '/admin/forms', icon: FileSpreadsheet },
-  { label: '代理承認', href: '/admin/proxy', icon: UserCheck },
+  { label: '代理設定', href: '/admin/proxy', icon: UserCheck },
+  { label: 'MS365同期', href: '/admin/sync', icon: Cloud },
 ]
 
 function NavContent({ onNavigate }: { onNavigate?: () => void }) {
