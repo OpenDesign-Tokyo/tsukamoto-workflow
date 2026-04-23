@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { submitApplication } from '@/lib/workflow/engine'
+import { selectRouteTemplate } from '@/lib/workflow/route-selector'
 import { writeAuditLog } from '@/lib/audit/logger'
 
 export async function GET(req: NextRequest) {
@@ -34,17 +35,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'User ID required' }, { status: 401 })
   }
 
-  // Get default route template for the document type
-  const { data: routeTemplate } = await supabase
+  // Get all active route templates for the document type
+  const { data: routeTemplates } = await supabase
     .from('approval_route_templates')
-    .select('id')
+    .select('id, is_default, condition')
     .eq('document_type_id', body.document_type_id)
-    .eq('is_default', true)
     .eq('is_active', true)
-    .maybeSingle()
+
+  if (!routeTemplates?.length) {
+    return NextResponse.json({ error: 'No approval route configured' }, { status: 400 })
+  }
+
+  // Select route based on conditions (amount-based branching) or fallback to default
+  const routeTemplate = selectRouteTemplate(routeTemplates, body.form_data || {})
 
   if (!routeTemplate) {
-    return NextResponse.json({ error: 'No approval route configured' }, { status: 400 })
+    return NextResponse.json({ error: 'No matching approval route' }, { status: 400 })
   }
 
   // Get total steps

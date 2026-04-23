@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { submitApplication } from '@/lib/workflow/engine'
+import { selectRouteTemplate } from '@/lib/workflow/route-selector'
 
 export async function GET(
   req: NextRequest,
@@ -51,7 +52,7 @@ export async function PUT(
   // Check application exists and is editable
   const { data: app } = await supabase
     .from('applications')
-    .select('id, status, applicant_id')
+    .select('id, status, applicant_id, document_type_id')
     .eq('id', id)
     .maybeSingle()
 
@@ -73,9 +74,28 @@ export async function PUT(
     updated_at: new Date().toISOString(),
   }
 
-  // If submitting (or resubmitting)
+  // If submitting (or resubmitting), re-evaluate route based on form_data
   if (body.submit) {
     updateData.status = 'submitted'
+
+    const { data: routeTemplates } = await supabase
+      .from('approval_route_templates')
+      .select('id, is_default, condition')
+      .eq('document_type_id', app.document_type_id)
+      .eq('is_active', true)
+
+    if (routeTemplates?.length) {
+      const selected = selectRouteTemplate(routeTemplates, body.form_data || {})
+      if (selected) {
+        const { count } = await supabase
+          .from('approval_route_steps')
+          .select('*', { count: 'exact', head: true })
+          .eq('route_template_id', selected.id)
+
+        updateData.route_template_id = selected.id
+        updateData.total_steps = count || 0
+      }
+    }
   }
 
   const { data, error } = await supabase

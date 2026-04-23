@@ -112,6 +112,13 @@ export interface FormSection {
   fields: string[]
 }
 
+export interface RouteCondition {
+  amount_field: string
+  compute_from?: { table: string; sum_column: string }
+  min?: number
+  max?: number
+}
+
 export interface ApprovalRouteTemplate {
   id: string
   document_type_id: string
@@ -119,7 +126,7 @@ export interface ApprovalRouteTemplate {
   description: string | null
   is_default: boolean
   is_active: boolean
-  condition: unknown
+  condition: RouteCondition | null
   created_at: string
   updated_at: string
 }
