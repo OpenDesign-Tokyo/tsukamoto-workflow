@@ -66,6 +66,7 @@ function LoginForm() {
       provider: 'azure',
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
+        scopes: 'openid email profile',
       },
     })
   }
