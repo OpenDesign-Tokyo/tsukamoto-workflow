@@ -69,13 +69,19 @@ export function buildAdaptiveCard(ctx: CardContext) {
       ...(facts.length > 0
         ? [{ type: 'FactSet' as const, facts, spacing: 'medium' as const }]
         : []),
+      {
+        type: 'TextBlock',
+        text: `[詳細を見る →](${fullUrl})`,
+        wrap: true,
+        spacing: 'medium',
+        color: 'accent',
+      },
     ],
     actions: [
       {
         type: 'Action.OpenUrl',
         title: '詳細を見る',
         url: fullUrl,
-        style: 'positive',
       },
     ],
   }
