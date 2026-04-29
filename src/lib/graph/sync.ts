@@ -49,10 +49,11 @@ async function runSync(dryRun: boolean): Promise<SyncResult> {
   // 1. Fetch all users from Graph API
   const graphUsers = await getUsers()
 
-  // Filter to only users with email (skip service accounts, room mailboxes, etc.)
+  // Filter to only real person accounts in company domain
+  const COMPANY_DOMAIN = '@tsukamoto.co.jp'
   const validUsers = graphUsers.filter(u => {
-    const email = u.mail || u.userPrincipalName
-    return email && !email.startsWith('#') && u.accountEnabled
+    const email = (u.mail || u.userPrincipalName || '').toLowerCase()
+    return email.endsWith(COMPANY_DOMAIN) && u.accountEnabled
   })
 
   // 2. Fetch existing data from Supabase
