@@ -21,7 +21,7 @@ interface Props {
   errors?: Record<string, string>
 }
 
-function evaluateSumFormula(formula: string, formData: Record<string, unknown>): number {
+function evaluateFormula(formula: string, formData: Record<string, unknown>): number {
   // Handle SUM(items.subtotal) style formulas
   const sumMatch = formula.match(/SUM\((\w+)\.(\w+)\)/)
   if (sumMatch) {
@@ -33,7 +33,19 @@ function evaluateSumFormula(formula: string, formData: Record<string, unknown>):
       return sum + (typeof val === 'number' ? val : 0)
     }, 0)
   }
-  return 0
+
+  // Handle simple arithmetic formulas like "quantity * unit_price"
+  try {
+    const expr = formula.replace(/[a-z_]\w*/gi, (match) => {
+      const val = formData[match]
+      return typeof val === 'number' ? String(val) : '0'
+    })
+    // Only allow digits, operators, parentheses, dots, spaces
+    if (!/^[\d+\-*/().  ]+$/.test(expr)) return 0
+    return Function(`"use strict"; return (${expr})`)() as number
+  } catch {
+    return 0
+  }
 }
 
 export function FormRenderer({ schema, formData, onChange, readOnly = false, errors = {} }: Props) {
@@ -129,7 +141,7 @@ export function FormRenderer({ schema, formData, onChange, readOnly = false, err
         )
       case 'formula': {
         const computed = field.formula
-          ? evaluateSumFormula(field.formula, formData)
+          ? evaluateFormula(field.formula, formData)
           : 0
         return <FormulaField key={field.id} field={field} value={computed} />
       }
