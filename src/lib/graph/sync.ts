@@ -51,9 +51,16 @@ async function runSync(dryRun: boolean): Promise<SyncResult> {
 
   // Filter to only real person accounts in company domain
   const COMPANY_DOMAIN = '@tsukamoto.co.jp'
+  const EXCLUDED_PREFIXES = [
+    'room_', 'showroom_', 'us_cycle_', 'us_',
+    'aim@', 'aimorder@', 'aimdirect-info@', 'duuxdirect-info@',
+    'bookings@', 'solution@', 'wellnes@', 'corpo-honbu@',
+  ]
   const validUsers = graphUsers.filter(u => {
     const email = (u.mail || u.userPrincipalName || '').toLowerCase()
-    return email.endsWith(COMPANY_DOMAIN) && u.accountEnabled
+    if (!email.endsWith(COMPANY_DOMAIN) || !u.accountEnabled) return false
+    const local = email.split('@')[0]
+    return !EXCLUDED_PREFIXES.some(p => p.includes('@') ? email.startsWith(p) : local.startsWith(p))
   })
 
   // 2. Fetch existing data from Supabase
