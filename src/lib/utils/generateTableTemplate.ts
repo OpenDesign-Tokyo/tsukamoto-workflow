@@ -67,9 +67,10 @@ export async function generateTableTemplate(field: FormField): Promise<ArrayBuff
       labelCell.border = ALL_BORDERS
       labelCell.alignment = { horizontal: 'center', vertical: 'middle' }
 
-      // Value cell (sample date)
+      // Value cell (sample date – date only, no time)
       const valCell = hRow.getCell(col + 1)
-      valCell.value = new Date()
+      const today = new Date()
+      valCell.value = new Date(today.getFullYear(), today.getMonth(), today.getDate())
       valCell.numFmt = 'yyyy/mm/dd'
       valCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.inputBg } }
       valCell.border = ALL_BORDERS
