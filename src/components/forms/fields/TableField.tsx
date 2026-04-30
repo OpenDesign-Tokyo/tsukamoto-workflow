@@ -38,36 +38,66 @@ export function TableField({ field, value, onChange, readOnly }: Props) {
       const XLSX = await import('xlsx')
       const data = await file.arrayBuffer()
       const wb = XLSX.read(data, { type: 'array' })
-      // Prefer "データ入力" sheet (import-compatible) if it exists
-      const ws = wb.Sheets['データ入力'] || wb.Sheets[wb.SheetNames[0]]
-      const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown as unknown[][]
-
-      if (!jsonData.length) return
-
-      // First row might be headers - check if they match column labels
       const editableColumns = columns.filter(c => c.type !== 'formula')
-      let dataRows = jsonData
 
-      // Check if first row looks like headers
-      const firstRow = jsonData[0]
-      if (firstRow && editableColumns.some(col =>
-        firstRow.some(cell => typeof cell === 'string' && col.label && cell.includes(col.label))
-      )) {
-        dataRows = jsonData.slice(1)
-      }
+      // Try sheets in priority order: データ入力 → first sheet → others
+      const sheetOrder = ['データ入力', ...wb.SheetNames].filter(
+        (name, i, arr) => wb.Sheets[name] && arr.indexOf(name) === i
+      )
 
-      const newRows = dataRows
-        .filter(row => row.some(cell => cell != null && cell !== ''))
-        .map(pastedRow => {
+      for (const sheetName of sheetOrder) {
+        const ws = wb.Sheets[sheetName]
+        const allRows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][]
+        if (!allRows.length) continue
+
+        // Find the header row by scanning for column label matches
+        let headerIdx = -1
+        let colMapping: { srcIdx: number; col: typeof editableColumns[number] }[] = []
+
+        for (let i = 0; i < Math.min(allRows.length, 10); i++) {
+          const row = allRows[i] as (string | number | null)[]
+          if (!row) continue
+
+          const mapping: typeof colMapping = []
+          for (const col of editableColumns) {
+            const idx = row.findIndex(cell =>
+              typeof cell === 'string' && col.label && cell.trim() === col.label
+            )
+            if (idx >= 0) mapping.push({ srcIdx: idx, col })
+          }
+          // Accept if at least half of the editable columns match
+          if (mapping.length >= Math.ceil(editableColumns.length / 2)) {
+            headerIdx = i
+            colMapping = mapping
+            break
+          }
+        }
+
+        if (headerIdx < 0 || colMapping.length === 0) continue
+
+        // Extract data rows: after header, skip empty and "合計" rows
+        const dataRows = allRows.slice(headerIdx + 1).filter(raw => {
+          const row = raw as (string | number | null)[]
+          if (!row || !Array.isArray(row)) return false
+          if (row.some(cell => typeof cell === 'string' && cell.trim() === '合計')) return false
+          return row.some(cell => cell != null && cell !== '')
+        })
+
+        if (dataRows.length === 0) continue
+
+        const newRows = dataRows.map(raw => {
+          const srcRow = raw as (string | number | null)[]
           const row: Record<string, unknown> = {}
-          editableColumns.forEach((col, colIdx) => {
-            const val = pastedRow[colIdx]
+
+          for (const { srcIdx, col } of colMapping) {
+            const val = srcRow[srcIdx]
             if (col.type === 'number' || col.type === 'currency') {
               row[col.id] = val != null ? Number(String(val).replace(/[,¥]/g, '')) || 0 : ''
             } else {
               row[col.id] = val != null ? String(val) : ''
             }
-          })
+          }
+
           columns.forEach(col => {
             if (col.type === 'formula' && col.formula) {
               row[col.id] = evaluateFormula(col.formula, row)
@@ -76,11 +106,13 @@ export function TableField({ field, value, onChange, readOnly }: Props) {
           return row
         })
 
-      if (newRows.length > 0) {
-        onChange(newRows)
+        if (newRows.length > 0) {
+          onChange(newRows)
+          return
+        }
       }
-    } catch {
-      // silently fail
+    } catch (err) {
+      console.error('Excel import error:', err)
     }
   }, [columns, onChange])
 
