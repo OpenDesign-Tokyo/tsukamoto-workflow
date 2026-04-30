@@ -29,6 +29,7 @@ import type { ApplicationStatus } from '@/lib/types/workflow'
 import type { FormSchema } from '@/lib/types/database'
 import { createClient } from '@/lib/supabase/client'
 import { exportApplicationPdf } from '@/lib/utils/exportPdf'
+import { exportApplicationExcel } from '@/lib/utils/exportExcel'
 
 interface Comment {
   id: string
@@ -80,19 +81,23 @@ export default function ApplicationDetailPage() {
     fetchComments()
   }, [fetchApplication, fetchComments])
 
-  const handleApprove = async (comment?: string) => {
+  const handleApprove = async (comment?: string, selectedNextApprovers?: string[]) => {
     setIsProcessing(true)
     try {
       const res = await fetch(`/api/applications/${id}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
-        body: JSON.stringify({ comment }),
+        body: JSON.stringify({ comment, selectedNextApprovers }),
       })
       if (res.ok) {
         const data = await res.json()
+        if (data.waitingForOthers) {
+          toast.success('承認しました（他の承認者の承認を待っています）')
+        } else {
+          toast.success('承認しました')
+        }
         if (data.application) setApplication(data.application)
         else await fetchApplication()
-        toast.success('承認しました')
       } else {
         const data = await res.json()
         toast.error(data.error || '承認に失敗しました')
@@ -207,14 +212,24 @@ export default function ApplicationDetailPage() {
         </div>
         <div className="flex gap-2">
           {schema && application.status === 'approved' && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => exportApplicationPdf(application, schema)}
-            >
-              <Download className="w-4 h-4 mr-1" />
-              PDF
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => exportApplicationPdf(application, schema)}
+              >
+                <Download className="w-4 h-4 mr-1" />
+                PDF
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => exportApplicationExcel(application, schema)}
+              >
+                <Download className="w-4 h-4 mr-1" />
+                Excel
+              </Button>
+            </>
           )}
           {canEdit && (
             <Button

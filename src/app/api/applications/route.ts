@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
 
   // If submitting, start workflow
   if (body.submit && application) {
-    const result = await submitApplication(application.id)
+    const result = await submitApplication(application.id, body.selected_approvers)
     if (!result.success) {
       return NextResponse.json({ error: result.error, application }, { status: 400 })
     }

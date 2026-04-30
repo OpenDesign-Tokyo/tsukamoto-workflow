@@ -1,19 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
 import { writeAuditLog } from '@/lib/audit/logger'
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const adminId = await requireAdmin(req)
+  if (!adminId) return forbidden()
+
   const { id } = await params
   const supabase = createAdminClient()
   const body = await req.json()
-  const userId = req.headers.get('x-demo-user-id')
-
-  if (!userId) {
-    return NextResponse.json({ error: 'User ID required' }, { status: 401 })
-  }
 
   const { data, error } = await supabase
     .from('proxy_settings')
@@ -31,7 +30,7 @@ export async function PUT(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   await writeAuditLog({
-    actorId: userId,
+    actorId: adminId,
     action: 'proxy.update',
     targetType: 'proxy_setting',
     targetId: id,
@@ -45,13 +44,11 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const adminId = await requireAdmin(req)
+  if (!adminId) return forbidden()
+
   const { id } = await params
   const supabase = createAdminClient()
-  const userId = req.headers.get('x-demo-user-id')
-
-  if (!userId) {
-    return NextResponse.json({ error: 'User ID required' }, { status: 401 })
-  }
 
   const { error } = await supabase
     .from('proxy_settings')
@@ -61,7 +58,7 @@ export async function DELETE(
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   await writeAuditLog({
-    actorId: userId,
+    actorId: adminId,
     action: 'proxy.delete',
     targetType: 'proxy_setting',
     targetId: id,

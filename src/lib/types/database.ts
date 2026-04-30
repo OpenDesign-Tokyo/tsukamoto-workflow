@@ -140,6 +140,7 @@ export interface ApprovalRouteStep {
   assignee_position_id: string | null
   assignee_employee_id: string | null
   approval_type: 'single' | 'all' | 'any'
+  allow_dynamic_selection: boolean
   can_skip: boolean
   is_stamp_required: boolean
   created_at: string
@@ -161,6 +162,7 @@ export interface Application {
   submitted_at: string | null
   approved_at: string | null
   archived_at: string | null
+  selected_approvers: Record<string, string[]> | null
   sharepoint_url: string | null
   created_at: string
   updated_at: string
@@ -177,6 +179,7 @@ export interface ApprovalRecord {
   action: 'pending' | 'approved' | 'rejected' | 'skipped'
   comment: string | null
   acted_at: string | null
+  selected_next_approvers: string[] | null
   teams_notification_sent: boolean
   teams_notification_sent_at: string | null
   created_at: string

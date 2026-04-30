@@ -27,6 +27,7 @@ export interface WorkflowApproveResult {
     approver: ResolvedApprover
   }
   isCompleted: boolean
+  waitingForOthers?: boolean
   error?: string
 }
 

@@ -1,20 +1,241 @@
 import { createAdminClient } from '@/lib/supabase/admin'
-import { resolveApprover } from './resolver'
+import { resolveApprover, resolveApprovers } from './resolver'
 import { sendWorkflowNotification } from './notifications'
-import type { WorkflowSubmitResult, WorkflowApproveResult, WorkflowRejectResult } from '@/lib/types/workflow'
+import type { WorkflowSubmitResult, WorkflowApproveResult, WorkflowRejectResult, ResolvedApprover } from '@/lib/types/workflow'
+import type { ApprovalRouteStep } from '@/lib/types/database'
+
+type Supabase = ReturnType<typeof createAdminClient>
+
+/**
+ * Helper: activate a step by creating approval_records and sending notifications.
+ * Handles single / any / all approval types.
+ * Returns the list of approvers assigned to this step, or null if no approver found.
+ */
+async function activateStep(
+  supabase: Supabase,
+  applicationId: string,
+  step: ApprovalRouteStep,
+  applicantId: string,
+  departmentId: string,
+  appTitle: string,
+  appNumber: string,
+  applicantName: string,
+  documentTypeName: string | undefined,
+  totalSteps: number,
+  selectedApproverIds?: string[],
+): Promise<ResolvedApprover[] | null> {
+  const approvalType = step.approval_type || 'single'
+
+  // Resolve candidates
+  let approvers: ResolvedApprover[]
+  if (approvalType === 'single') {
+    // For single: use first candidate (or the one selected by applicant)
+    if (selectedApproverIds?.length) {
+      // Get details for the selected approver
+      const allCandidates = await resolveApprovers(step, applicantId, departmentId)
+      const selected = allCandidates.find(a => selectedApproverIds.includes(a.employeeId))
+      approvers = selected ? [selected] : allCandidates.slice(0, 1)
+    } else {
+      const single = await resolveApprover(step, applicantId, departmentId)
+      approvers = single ? [single] : []
+    }
+  } else {
+    // For any/all: get all candidates
+    const allCandidates = await resolveApprovers(step, applicantId, departmentId)
+    if (selectedApproverIds?.length) {
+      // Filter to selected approvers only
+      approvers = allCandidates.filter(a => selectedApproverIds.includes(a.employeeId))
+      if (approvers.length === 0) approvers = allCandidates
+    } else {
+      approvers = allCandidates
+    }
+  }
+
+  if (approvers.length === 0) return null
+
+  // Create approval records for all assigned approvers
+  const records = approvers.map(a => ({
+    application_id: applicationId,
+    step_order: step.step_order,
+    step_name: step.name,
+    approver_id: a.employeeId,
+    is_proxy: a.isProxy,
+    proxy_for_id: a.proxyForId || null,
+    action: 'pending' as const,
+  }))
+  await supabase.from('approval_records').insert(records)
+
+  // Send notifications to all approvers
+  for (const a of approvers) {
+    await sendWorkflowNotification({
+      recipientId: a.employeeId,
+      applicationId,
+      type: 'approval_request',
+      title: `承認依頼: ${appTitle}`,
+      body: `${applicantName}さんから「${appTitle}」の承認依頼があります。`,
+      actionUrl: `/applications/${applicationId}`,
+      applicationNumber: appNumber,
+      applicantName,
+      documentTypeName,
+      currentStep: step.step_order,
+      totalSteps,
+    })
+  }
+
+  return approvers
+}
+
+/**
+ * Helper: mark application as approved (final).
+ */
+async function finalApprove(
+  supabase: Supabase,
+  applicationId: string,
+  applicantId: string,
+  appTitle: string,
+  appNumber: string,
+  applicantName: string,
+  documentTypeName: string | undefined,
+  totalSteps: number,
+) {
+  await supabase
+    .from('applications')
+    .update({
+      status: 'approved',
+      approved_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', applicationId)
+
+  await sendWorkflowNotification({
+    recipientId: applicantId,
+    applicationId,
+    type: 'approved',
+    title: `決裁完了: ${appTitle}`,
+    body: `「${appTitle}」が決裁されました。`,
+    actionUrl: `/applications/${applicationId}`,
+    applicationNumber: appNumber,
+    applicantName,
+    documentTypeName,
+    currentStep: totalSteps,
+    totalSteps,
+  })
+}
+
+/**
+ * Helper: advance to the next resolvable step after current step.
+ * Skips steps where no approver can be found.
+ * Returns the result for the caller.
+ */
+async function advanceToNextStep(
+  supabase: Supabase,
+  applicationId: string,
+  application: Record<string, unknown>,
+  applicantName: string,
+  documentTypeName: string | undefined,
+  selectedNextApproverIds?: string[],
+): Promise<WorkflowApproveResult> {
+  const routeTemplateId = application.route_template_id as string
+  const applicantId = application.applicant_id as string
+  const appTitle = application.title as string
+  const appNumber = application.application_number as string
+  const currentStep = application.current_step as number
+  const totalSteps = application.total_steps as number
+
+  const isLastStep = currentStep >= totalSteps
+  if (isLastStep) {
+    await finalApprove(supabase, applicationId, applicantId, appTitle, appNumber, applicantName, documentTypeName, totalSteps)
+    return { success: true, isCompleted: true }
+  }
+
+  // Get remaining steps
+  const { data: remainingSteps } = await supabase
+    .from('approval_route_steps')
+    .select('*')
+    .eq('route_template_id', routeTemplateId)
+    .gt('step_order', currentStep)
+    .order('step_order')
+
+  if (!remainingSteps?.length) {
+    await finalApprove(supabase, applicationId, applicantId, appTitle, appNumber, applicantName, documentTypeName, totalSteps)
+    return { success: true, isCompleted: true }
+  }
+
+  // Get applicant's department
+  const { data: assignment } = await supabase
+    .from('employee_assignments')
+    .select('department_id')
+    .eq('employee_id', applicantId)
+    .eq('is_primary', true)
+    .eq('is_active', true)
+    .maybeSingle()
+
+  if (!assignment) {
+    return { success: false, isCompleted: false, error: 'Applicant department not found' }
+  }
+
+  // Find next resolvable step
+  for (const step of remainingSteps) {
+    // For the immediate next step, use selectedNextApproverIds if provided
+    const selIds = step === remainingSteps[0] ? selectedNextApproverIds : undefined
+    const approvers = await activateStep(
+      supabase, applicationId, step, applicantId, assignment.department_id,
+      appTitle, appNumber, applicantName, documentTypeName, totalSteps,
+      selIds,
+    )
+
+    if (approvers && approvers.length > 0) {
+      // Update application current_step
+      await supabase
+        .from('applications')
+        .update({ current_step: step.step_order, updated_at: new Date().toISOString() })
+        .eq('id', applicationId)
+
+      return {
+        success: true,
+        isCompleted: false,
+        nextStep: {
+          stepOrder: step.step_order,
+          stepName: step.name,
+          approver: approvers[0],
+        },
+      }
+    }
+
+    // Skip this step: no approver found
+    await supabase
+      .from('approval_records')
+      .insert({
+        application_id: applicationId,
+        step_order: step.step_order,
+        step_name: step.name,
+        approver_id: applicantId,
+        is_proxy: false,
+        action: 'skipped',
+        comment: '該当承認者不在のためスキップ',
+        acted_at: new Date().toISOString(),
+      })
+  }
+
+  // All remaining steps unresolvable — treat as final
+  await finalApprove(supabase, applicationId, applicantId, appTitle, appNumber, applicantName, documentTypeName, totalSteps)
+  return { success: true, isCompleted: true }
+}
 
 /**
  * 申請送信時:
- * 1. applications を submitted に更新
+ * 1. applications を in_approval に更新
  * 2. 承認ルートテンプレートから全ステップを取得
- * 3. step_order=1 の承認者を resolver で解決
+ * 3. 最初のステップの承認者を resolver で解決（single/any/all対応）
  * 4. approval_records に pending で INSERT
- * 5. 通知送信（アプリ内 + Teams※モック）
+ * 5. 通知送信
  */
-export async function submitApplication(applicationId: string): Promise<WorkflowSubmitResult> {
+export async function submitApplication(
+  applicationId: string,
+  selectedApprovers?: Record<string, string[]>,
+): Promise<WorkflowSubmitResult> {
   const supabase = createAdminClient()
 
-  // Get the application
   const { data: application, error: appError } = await supabase
     .from('applications')
     .select('*, applicant:employees!applicant_id(*), document_type:document_types(name)')
@@ -29,7 +250,15 @@ export async function submitApplication(applicationId: string): Promise<Workflow
   const applicantName = applicant.name
   const documentTypeName = (application.document_type as { name: string } | null)?.name
 
-  // Admin self-approval: single step where admin approves their own application
+  // Store selected_approvers if provided
+  if (selectedApprovers && Object.keys(selectedApprovers).length > 0) {
+    await supabase
+      .from('applications')
+      .update({ selected_approvers: selectedApprovers })
+      .eq('id', applicationId)
+  }
+
+  // Admin self-approval
   if (applicant.is_admin) {
     await supabase
       .from('applications')
@@ -105,224 +334,25 @@ export async function submitApplication(applicationId: string): Promise<Workflow
     return { success: false, applicationId, applicationNumber: application.application_number, error: 'Applicant has no department' }
   }
 
-  // Resolve first resolvable approver (skip steps where approver cannot be found)
-  let resolvedStep: typeof steps[0] | null = null
-  let approver: Awaited<ReturnType<typeof resolveApprover>> = null
-  let resolvedStepIndex = 0
+  // Find first resolvable step
+  let firstApproverResult: ResolvedApprover[] | null = null
+  let activeStep: typeof steps[0] | null = null
 
-  for (let i = 0; i < steps.length; i++) {
-    approver = await resolveApprover(steps[i], application.applicant_id, assignment.department_id)
-    if (approver) {
-      resolvedStep = steps[i]
-      resolvedStepIndex = i
+  for (const step of steps) {
+    const selIds = selectedApprovers?.[String(step.step_order)]
+    const result = await activateStep(
+      supabase, applicationId, step, application.applicant_id, assignment.department_id,
+      application.title, application.application_number, applicantName, documentTypeName,
+      steps.length, selIds,
+    )
+
+    if (result && result.length > 0) {
+      firstApproverResult = result
+      activeStep = step
       break
     }
-    // Skip this step: mark as auto-skipped
-    await supabase
-      .from('approval_records')
-      .insert({
-        application_id: applicationId,
-        step_order: steps[i].step_order,
-        step_name: steps[i].name,
-        approver_id: application.applicant_id,
-        is_proxy: false,
-        action: 'skipped',
-        comment: '該当承認者不在のためスキップ',
-        acted_at: new Date().toISOString(),
-      })
-  }
 
-  if (!resolvedStep || !approver) {
-    return { success: false, applicationId, applicationNumber: application.application_number, error: 'No resolvable approver found in any step' }
-  }
-
-  const activeStepOrder = resolvedStep.step_order
-
-  // Update application status
-  await supabase
-    .from('applications')
-    .update({
-      status: 'in_approval',
-      current_step: activeStepOrder,
-      total_steps: steps.length,
-      submitted_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', applicationId)
-
-  // Create approval record
-  await supabase
-    .from('approval_records')
-    .insert({
-      application_id: applicationId,
-      step_order: activeStepOrder,
-      step_name: resolvedStep.name,
-      approver_id: approver.employeeId,
-      is_proxy: approver.isProxy,
-      proxy_for_id: approver.proxyForId || null,
-      action: 'pending',
-    })
-
-  // Send notification
-  await sendWorkflowNotification({
-    recipientId: approver.employeeId,
-    applicationId,
-    type: 'approval_request',
-    title: `承認依頼: ${application.title}`,
-    body: `${applicantName}さんから「${application.title}」の承認依頼があります。`,
-    actionUrl: `/applications/${applicationId}`,
-    applicationNumber: application.application_number,
-    applicantName,
-    documentTypeName,
-    currentStep: activeStepOrder,
-    totalSteps: steps.length,
-  })
-
-  return {
-    success: true,
-    applicationId,
-    applicationNumber: application.application_number,
-    firstApprover: approver,
-  }
-}
-
-/**
- * 承認時:
- * 1. approval_records を approved に更新
- * 2. current_step < total_steps なら:
- *    - 次のステップの承認者を解決
- *    - approval_records に pending で INSERT
- *    - 通知送信
- *    - applications の current_step を +1
- * 3. current_step == total_steps なら:
- *    - applications の status を approved に
- *    - 申請者に完了通知
- */
-export async function approveApplication(
-  applicationId: string,
-  approverId: string,
-  comment?: string
-): Promise<WorkflowApproveResult> {
-  const supabase = createAdminClient()
-
-  // Get the application
-  const { data: application } = await supabase
-    .from('applications')
-    .select('*, applicant:employees!applicant_id(*), document_type:document_types(name)')
-    .eq('id', applicationId)
-    .maybeSingle()
-
-  if (!application) {
-    return { success: false, isCompleted: false, error: 'Application not found' }
-  }
-
-  const applicantName = (application.applicant as { name: string }).name
-  const documentTypeName = (application.document_type as { name: string } | null)?.name
-
-  // Update current approval record
-  await supabase
-    .from('approval_records')
-    .update({
-      action: 'approved',
-      comment: comment || null,
-      acted_at: new Date().toISOString(),
-    })
-    .eq('application_id', applicationId)
-    .eq('step_order', application.current_step)
-    .eq('approver_id', approverId)
-
-  const isLastStep = application.current_step >= application.total_steps
-
-  if (isLastStep) {
-    // Final approval
-    await supabase
-      .from('applications')
-      .update({
-        status: 'approved',
-        approved_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', applicationId)
-
-    // Notify applicant
-    await sendWorkflowNotification({
-      recipientId: application.applicant_id,
-      applicationId,
-      type: 'approved',
-      title: `決裁完了: ${application.title}`,
-      body: `「${application.title}」が決裁されました。`,
-      actionUrl: `/applications/${applicationId}`,
-      applicationNumber: application.application_number,
-      applicantName,
-      documentTypeName,
-      currentStep: application.total_steps,
-      totalSteps: application.total_steps,
-    })
-
-    return { success: true, isCompleted: true }
-  }
-
-  // Get remaining steps
-  const { data: remainingSteps } = await supabase
-    .from('approval_route_steps')
-    .select('*')
-    .eq('route_template_id', application.route_template_id)
-    .gt('step_order', application.current_step)
-    .order('step_order')
-
-  if (!remainingSteps?.length) {
-    // No more steps — treat as final approval
-    await supabase
-      .from('applications')
-      .update({
-        status: 'approved',
-        approved_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', applicationId)
-
-    await sendWorkflowNotification({
-      recipientId: application.applicant_id,
-      applicationId,
-      type: 'approved',
-      title: `決裁完了: ${application.title}`,
-      body: `「${application.title}」が決裁されました。`,
-      actionUrl: `/applications/${applicationId}`,
-      applicationNumber: application.application_number,
-      applicantName,
-      documentTypeName,
-      currentStep: application.total_steps,
-      totalSteps: application.total_steps,
-    })
-
-    return { success: true, isCompleted: true }
-  }
-
-  // Get applicant's department
-  const { data: assignment } = await supabase
-    .from('employee_assignments')
-    .select('department_id')
-    .eq('employee_id', application.applicant_id)
-    .eq('is_primary', true)
-    .eq('is_active', true)
-    .maybeSingle()
-
-  if (!assignment) {
-    return { success: false, isCompleted: false, error: 'Applicant department not found' }
-  }
-
-  // Find next resolvable step (skip steps where approver cannot be found)
-  let nextStep: typeof remainingSteps[0] | null = null
-  let nextApprover: Awaited<ReturnType<typeof resolveApprover>> = null
-
-  for (const step of remainingSteps) {
-    const resolved = await resolveApprover(step, application.applicant_id, assignment.department_id)
-    if (resolved) {
-      nextStep = step
-      nextApprover = resolved
-      break
-    }
-    // Skip: mark as auto-skipped
+    // Skip this step
     await supabase
       .from('approval_records')
       .insert({
@@ -337,89 +367,124 @@ export async function approveApplication(
       })
   }
 
-  if (!nextStep || !nextApprover) {
-    // All remaining steps unresolvable — treat as final approval
-    await supabase
-      .from('applications')
-      .update({
-        status: 'approved',
-        approved_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', applicationId)
-
-    await sendWorkflowNotification({
-      recipientId: application.applicant_id,
-      applicationId,
-      type: 'approved',
-      title: `決裁完了: ${application.title}`,
-      body: `「${application.title}」が決裁されました。`,
-      actionUrl: `/applications/${applicationId}`,
-      applicationNumber: application.application_number,
-      applicantName,
-      documentTypeName,
-      currentStep: application.total_steps,
-      totalSteps: application.total_steps,
-    })
-
-    return { success: true, isCompleted: true }
+  if (!activeStep || !firstApproverResult) {
+    return { success: false, applicationId, applicationNumber: application.application_number, error: 'No resolvable approver found in any step' }
   }
 
-  const nextStepOrder = nextStep.step_order
-
-  // Update application
+  // Update application status
   await supabase
     .from('applications')
     .update({
-      current_step: nextStepOrder,
+      status: 'in_approval',
+      current_step: activeStep.step_order,
+      total_steps: steps.length,
+      submitted_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq('id', applicationId)
 
-  // Create next approval record
-  await supabase
-    .from('approval_records')
-    .insert({
-      application_id: applicationId,
-      step_order: nextStepOrder,
-      step_name: nextStep.name,
-      approver_id: nextApprover.employeeId,
-      is_proxy: nextApprover.isProxy,
-      proxy_for_id: nextApprover.proxyForId || null,
-      action: 'pending',
-    })
-
-  // Send notification
-  await sendWorkflowNotification({
-    recipientId: nextApprover.employeeId,
-    applicationId,
-    type: 'approval_request',
-    title: `承認依頼: ${application.title}`,
-    body: `「${application.title}」の承認をお願いします（ステップ ${nextStepOrder}/${application.total_steps}）`,
-    actionUrl: `/applications/${applicationId}`,
-    applicationNumber: application.application_number,
-    applicantName,
-    documentTypeName,
-    currentStep: nextStepOrder,
-    totalSteps: application.total_steps,
-  })
-
   return {
     success: true,
-    isCompleted: false,
-    nextStep: {
-      stepOrder: nextStepOrder,
-      stepName: nextStep.name,
-      approver: nextApprover,
-    },
+    applicationId,
+    applicationNumber: application.application_number,
+    firstApprover: firstApproverResult[0],
   }
 }
 
 /**
- * 差戻し時:
- * 1. approval_records を rejected に更新
- * 2. applications の status を rejected に
- * 3. 申請者に差戻し通知
+ * 承認時（single/any/all対応）:
+ * - single: 次ステップへ進む
+ * - any: 1人承認 → 残りpendingをskipped → 次ステップへ
+ * - all: 全員承認済みか確認 → 未完了なら待機、完了なら次ステップへ
+ */
+export async function approveApplication(
+  applicationId: string,
+  approverId: string,
+  comment?: string,
+  selectedNextApprovers?: string[],
+): Promise<WorkflowApproveResult> {
+  const supabase = createAdminClient()
+
+  const { data: application } = await supabase
+    .from('applications')
+    .select('*, applicant:employees!applicant_id(*), document_type:document_types(name)')
+    .eq('id', applicationId)
+    .maybeSingle()
+
+  if (!application) {
+    return { success: false, isCompleted: false, error: 'Application not found' }
+  }
+
+  const applicantName = (application.applicant as { name: string }).name
+  const documentTypeName = (application.document_type as { name: string } | null)?.name
+
+  // Update this approver's record
+  const updateData: Record<string, unknown> = {
+    action: 'approved',
+    comment: comment || null,
+    acted_at: new Date().toISOString(),
+  }
+  if (selectedNextApprovers?.length) {
+    updateData.selected_next_approvers = selectedNextApprovers
+  }
+  await supabase
+    .from('approval_records')
+    .update(updateData)
+    .eq('application_id', applicationId)
+    .eq('step_order', application.current_step)
+    .eq('approver_id', approverId)
+    .eq('action', 'pending')
+
+  // Get the current step definition to check approval_type
+  const { data: currentStepDef } = await supabase
+    .from('approval_route_steps')
+    .select('*')
+    .eq('route_template_id', application.route_template_id)
+    .eq('step_order', application.current_step)
+    .maybeSingle()
+
+  const approvalType = currentStepDef?.approval_type || 'single'
+
+  if (approvalType === 'all') {
+    // Check if all approvers for this step have approved
+    const { data: stepRecords } = await supabase
+      .from('approval_records')
+      .select('action')
+      .eq('application_id', applicationId)
+      .eq('step_order', application.current_step)
+
+    const pending = stepRecords?.filter(r => r.action === 'pending') || []
+    if (pending.length > 0) {
+      // Still waiting for other approvers
+      return { success: true, isCompleted: false, waitingForOthers: true }
+    }
+    // All done — advance
+  }
+
+  if (approvalType === 'any') {
+    // Skip remaining pending records for this step
+    await supabase
+      .from('approval_records')
+      .update({
+        action: 'skipped',
+        comment: '他の承認者が承認済み',
+        acted_at: new Date().toISOString(),
+      })
+      .eq('application_id', applicationId)
+      .eq('step_order', application.current_step)
+      .eq('action', 'pending')
+  }
+
+  // Advance to next step (or finalize)
+  return advanceToNextStep(
+    supabase, applicationId, application, applicantName, documentTypeName,
+    selectedNextApprovers,
+  )
+}
+
+/**
+ * 差戻し時（multi-approver対応）:
+ * 1人が差戻し → 同ステップの他のpending recordsをskipped → 申請却下
  */
 export async function rejectApplication(
   applicationId: string,
@@ -441,7 +506,7 @@ export async function rejectApplication(
   const applicantName = (application.applicant as { name: string }).name
   const documentTypeName = (application.document_type as { name: string } | null)?.name
 
-  // Update approval record
+  // Update this approver's record
   await supabase
     .from('approval_records')
     .update({
@@ -452,6 +517,19 @@ export async function rejectApplication(
     .eq('application_id', applicationId)
     .eq('step_order', application.current_step)
     .eq('approver_id', approverId)
+    .eq('action', 'pending')
+
+  // Skip remaining pending records for this step (multi-approver)
+  await supabase
+    .from('approval_records')
+    .update({
+      action: 'skipped',
+      comment: '他の承認者が差戻し',
+      acted_at: new Date().toISOString(),
+    })
+    .eq('application_id', applicationId)
+    .eq('step_order', application.current_step)
+    .eq('action', 'pending')
 
   // Update application status
   await supabase

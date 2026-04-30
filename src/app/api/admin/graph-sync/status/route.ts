@@ -1,23 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { isGraphConfigured, testConnection } from '@/lib/graph/ms-graph'
+import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
 
 export async function GET(req: NextRequest) {
-  const userId = req.headers.get('x-demo-user-id')
-  if (!userId) {
-    return NextResponse.json({ error: 'User ID required' }, { status: 401 })
-  }
-
-  const supabase = createAdminClient()
-  const { data } = await supabase
-    .from('employees')
-    .select('id, is_admin')
-    .eq('id', userId)
-    .maybeSingle()
-
-  if (!data?.is_admin) {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
-  }
+  if (!(await requireAdmin(req))) return forbidden()
 
   if (!isGraphConfigured()) {
     return NextResponse.json({

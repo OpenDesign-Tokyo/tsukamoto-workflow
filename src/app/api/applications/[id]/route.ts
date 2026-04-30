@@ -118,7 +118,7 @@ export async function PUT(
         .eq('application_id', id)
     }
 
-    const result = await submitApplication(id)
+    const result = await submitApplication(id, body.selected_approvers)
     if (!result.success) {
       return NextResponse.json({ error: result.error, application: data }, { status: 400 })
     }

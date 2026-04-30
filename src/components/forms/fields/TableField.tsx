@@ -4,7 +4,7 @@ import { useCallback, useState, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, Trash2, Upload } from 'lucide-react'
+import { Plus, Trash2, Upload, Download } from 'lucide-react'
 import { formatCurrency } from '@/lib/utils/format'
 import type { FormField, TableColumn } from '@/lib/types/database'
 
@@ -187,6 +187,28 @@ export function TableField({ field, value, onChange, readOnly }: Props) {
           >
             <Upload className="w-3 h-3 mr-1" />
             ファイル選択
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-6 text-xs px-2"
+            onClick={async () => {
+              const { generateTableTemplate } = await import('@/lib/utils/generateTableTemplate')
+              const buf = await generateTableTemplate(field)
+              const blob = new Blob([buf], {
+                type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              })
+              const url = URL.createObjectURL(blob)
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `${field.label}_テンプレート.xlsx`
+              a.click()
+              URL.revokeObjectURL(url)
+            }}
+          >
+            <Download className="w-3 h-3 mr-1" />
+            テンプレート
           </Button>
           <input
             ref={fileInputRef}

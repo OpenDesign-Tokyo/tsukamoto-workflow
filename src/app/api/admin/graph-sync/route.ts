@@ -1,29 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase/admin'
 import { previewSync, executeSync } from '@/lib/graph/sync'
 import { isGraphConfigured } from '@/lib/graph/ms-graph'
 import { writeAuditLog } from '@/lib/audit/logger'
-
-async function requireAdmin(req: NextRequest) {
-  const userId = req.headers.get('x-demo-user-id')
-  if (!userId) return null
-
-  const supabase = createAdminClient()
-  const { data } = await supabase
-    .from('employees')
-    .select('id, is_admin')
-    .eq('id', userId)
-    .maybeSingle()
-
-  return data?.is_admin ? userId : null
-}
+import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
 
 // GET: Preview sync changes (dry-run)
 export async function GET(req: NextRequest) {
   const adminId = await requireAdmin(req)
-  if (!adminId) {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
-  }
+  if (!adminId) return forbidden()
 
   if (!isGraphConfigured()) {
     return NextResponse.json({ error: 'Microsoft Graph API is not configured' }, { status: 400 })
@@ -40,9 +24,7 @@ export async function GET(req: NextRequest) {
 // POST: Execute sync
 export async function POST(req: NextRequest) {
   const adminId = await requireAdmin(req)
-  if (!adminId) {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 })
-  }
+  if (!adminId) return forbidden()
 
   if (!isGraphConfigured()) {
     return NextResponse.json({ error: 'Microsoft Graph API is not configured' }, { status: 400 })

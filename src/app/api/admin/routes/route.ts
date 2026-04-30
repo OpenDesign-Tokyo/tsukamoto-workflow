@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!(await requireAdmin(req))) return forbidden()
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('approval_route_templates')
@@ -31,6 +34,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await requireAdmin(req))) return forbidden()
+
   const supabase = createAdminClient()
   const body = await req.json()
 
@@ -48,13 +53,15 @@ export async function POST(req: NextRequest) {
 
   // Insert steps
   if (body.steps?.length && route) {
-    const steps = body.steps.map((s: { step_order: number; name: string; assignee_type: string; assignee_position_id?: string; assignee_employee_id?: string }) => ({
+    const steps = body.steps.map((s: { step_order: number; name: string; assignee_type: string; assignee_position_id?: string; assignee_employee_id?: string; approval_type?: string; allow_dynamic_selection?: boolean }) => ({
       route_template_id: route.id,
       step_order: s.step_order,
       name: s.name,
       assignee_type: s.assignee_type,
       assignee_position_id: s.assignee_position_id || null,
       assignee_employee_id: s.assignee_employee_id || null,
+      approval_type: s.approval_type || 'single',
+      allow_dynamic_selection: s.allow_dynamic_selection || false,
     }))
 
     await supabase.from('approval_route_steps').insert(steps)

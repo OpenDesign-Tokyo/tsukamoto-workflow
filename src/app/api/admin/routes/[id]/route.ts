@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin(req))) return forbidden()
+
   const { id } = await params
   const supabase = createAdminClient()
   const body = await req.json()
@@ -29,13 +32,15 @@ export async function PUT(
       .eq('route_template_id', id)
 
     if (body.steps.length) {
-      const steps = body.steps.map((s: { step_order: number; name: string; assignee_type: string; assignee_position_id?: string; assignee_employee_id?: string }) => ({
+      const steps = body.steps.map((s: { step_order: number; name: string; assignee_type: string; assignee_position_id?: string; assignee_employee_id?: string; approval_type?: string; allow_dynamic_selection?: boolean }) => ({
         route_template_id: id,
         step_order: s.step_order,
         name: s.name,
         assignee_type: s.assignee_type,
         assignee_position_id: s.assignee_position_id || null,
         assignee_employee_id: s.assignee_employee_id || null,
+        approval_type: s.approval_type || 'single',
+        allow_dynamic_selection: s.allow_dynamic_selection || false,
       }))
 
       await supabase.from('approval_route_steps').insert(steps)
@@ -46,9 +51,11 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin(req))) return forbidden()
+
   const { id } = await params
   const supabase = createAdminClient()
 

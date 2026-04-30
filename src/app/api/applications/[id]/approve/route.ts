@@ -15,7 +15,7 @@ export async function POST(
     return NextResponse.json({ error: 'User ID required' }, { status: 401 })
   }
 
-  const result = await approveApplication(id, userId, body.comment)
+  const result = await approveApplication(id, userId, body.comment, body.selectedNextApprovers)
 
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: 400 })

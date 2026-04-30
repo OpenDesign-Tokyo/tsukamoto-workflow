@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin(req))) return forbidden()
+
   const { id } = await params
   const supabase = createAdminClient()
   const body = await req.json()
@@ -21,9 +24,11 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!(await requireAdmin(req))) return forbidden()
+
   const { id } = await params
   const supabase = createAdminClient()
 

@@ -28,8 +28,25 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Pencil, Trash2, X, FileText, CheckCircle2, ChevronRight, Route } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, FileText, CheckCircle2, ChevronRight, Route, GripVertical } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import type { DocumentType, Position } from '@/lib/types/database'
 
 interface RouteStep {
@@ -38,6 +55,22 @@ interface RouteStep {
   assignee_type: string
   position?: { id: string; name: string }
   assignee_position_id?: string
+  approval_type?: string
+  allow_dynamic_selection?: boolean
+}
+
+interface EditableStep {
+  id: string
+  name: string
+  assignee_type: string
+  assignee_position_id: string
+  approval_type: string
+  allow_dynamic_selection: boolean
+}
+
+let stepIdCounter = 0
+function nextStepId() {
+  return `step-${++stepIdCounter}`
 }
 
 interface RouteWithSteps {
@@ -57,6 +90,84 @@ const STEP_COLORS = [
   { bg: 'bg-emerald-500', ring: 'ring-emerald-100', text: 'text-emerald-600', light: 'bg-emerald-50' },
 ]
 
+function SortableStepItem({
+  step,
+  idx,
+  positions,
+  updateStep,
+  removeStep,
+}: {
+  step: EditableStep
+  idx: number
+  positions: Position[]
+  updateStep: (idx: number, field: string, value: string | boolean) => void
+  removeStep: (idx: number) => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: step.id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} className="space-y-1.5 p-2.5 border rounded-lg bg-gray-50/50">
+      <div className="flex items-center gap-2">
+        <button type="button" className="cursor-grab active:cursor-grabbing text-gray-400 hover:text-gray-600 shrink-0 touch-none" {...attributes} {...listeners}>
+          <GripVertical className="w-4 h-4" />
+        </button>
+        <div className={`w-6 h-6 rounded-full ${STEP_COLORS[idx % STEP_COLORS.length].bg} flex items-center justify-center shrink-0`}>
+          <span className="text-white text-[10px] font-bold">{idx + 1}</span>
+        </div>
+        <Input
+          value={step.name}
+          onChange={e => updateStep(idx, 'name', e.target.value)}
+          placeholder="ステップ名"
+          className="flex-1 h-8 text-sm"
+        />
+        <Select value={step.assignee_type} onValueChange={v => updateStep(idx, 'assignee_type', v)}>
+          <SelectTrigger className="w-40 h-8 text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="position_in_department">所属部署の役職</SelectItem>
+            <SelectItem value="position_in_parent_department">上位部署の役職</SelectItem>
+            <SelectItem value="specific_employee">指定社員</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={step.assignee_position_id} onValueChange={v => updateStep(idx, 'assignee_position_id', v)}>
+          <SelectTrigger className="w-28 h-8 text-xs"><SelectValue placeholder="役職" /></SelectTrigger>
+          <SelectContent>
+            {positions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button variant="ghost" size="sm" onClick={() => removeStep(idx)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600">
+          <X className="w-3.5 h-3.5" />
+        </Button>
+      </div>
+      <div className="flex items-center gap-3 pl-12">
+        <Select value={step.approval_type} onValueChange={v => updateStep(idx, 'approval_type', v)}>
+          <SelectTrigger className="w-36 h-7 text-[11px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="single">単独承認</SelectItem>
+            <SelectItem value="any">OR承認（いずれか1人）</SelectItem>
+            <SelectItem value="all">AND承認（全員）</SelectItem>
+          </SelectContent>
+        </Select>
+        {step.approval_type === 'all' && (
+          <label className="flex items-center gap-1.5 text-[11px] text-gray-500">
+            <input
+              type="checkbox"
+              checked={step.allow_dynamic_selection}
+              onChange={e => updateStep(idx, 'allow_dynamic_selection', e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            前承認者が対象者を選択
+          </label>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function RoutesPage() {
   return (
     <Suspense fallback={<div className="space-y-4"><Skeleton className="h-8 w-48" />{[1,2,3].map(i => <Skeleton key={i} className="h-32" />)}</div>}>
@@ -75,9 +186,25 @@ function RoutesPageInner() {
   const [showDialog, setShowDialog] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', document_type_id: '', is_default: false })
-  const [steps, setSteps] = useState<{ name: string; assignee_type: string; assignee_position_id: string }[]>([])
+  const [steps, setSteps] = useState<EditableStep[]>([])
   const [deleteTarget, setDeleteTarget] = useState<RouteWithSteps | null>(null)
   const [autoOpenHandled, setAutoOpenHandled] = useState(false)
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  const handleStepDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      setSteps(prev => {
+        const oldIndex = prev.findIndex(s => s.id === active.id)
+        const newIndex = prev.findIndex(s => s.id === over.id)
+        return arrayMove(prev, oldIndex, newIndex)
+      })
+    }
+  }
 
   const fetchData = useCallback(async () => {
     const res = await fetch('/api/admin/routes', { headers: getDemoUserHeader() })
@@ -108,9 +235,9 @@ function RoutesPageInner() {
         is_default: true,
       })
       setSteps([
-        { name: '課長承認', assignee_type: 'position_in_department', assignee_position_id: '' },
-        { name: '部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '' },
-        { name: '事業部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '' },
+        { id: nextStepId(), name: '課長承認', assignee_type: 'position_in_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false },
+        { id: nextStepId(), name: '部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false },
+        { id: nextStepId(), name: '事業部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false },
       ])
       setShowDialog(true)
     }
@@ -120,9 +247,9 @@ function RoutesPageInner() {
     setEditingId(null)
     setForm({ name: '標準承認ルート（3段階）', document_type_id: '', is_default: true })
     setSteps([
-      { name: '課長承認', assignee_type: 'position_in_department', assignee_position_id: '' },
-      { name: '部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '' },
-      { name: '事業部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '' },
+      { id: nextStepId(), name: '課長承認', assignee_type: 'position_in_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false },
+      { id: nextStepId(), name: '部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false },
+      { id: nextStepId(), name: '事業部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false },
     ])
     setShowDialog(true)
   }
@@ -131,29 +258,32 @@ function RoutesPageInner() {
     setEditingId(route.id)
     setForm({ name: route.name, document_type_id: route.document_type?.id || '', is_default: route.is_default })
     setSteps(route.steps.map(s => ({
+      id: nextStepId(),
       name: s.name,
       assignee_type: s.assignee_type,
       assignee_position_id: s.position?.id || s.assignee_position_id || '',
+      approval_type: s.approval_type || 'single',
+      allow_dynamic_selection: s.allow_dynamic_selection || false,
     })))
     setShowDialog(true)
   }
 
   const addStep = () => {
-    setSteps(s => [...s, { name: '', assignee_type: 'position_in_department', assignee_position_id: '' }])
+    setSteps(s => [...s, { id: nextStepId(), name: '', assignee_type: 'position_in_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false }])
   }
 
   const removeStep = (idx: number) => {
     setSteps(s => s.filter((_, i) => i !== idx))
   }
 
-  const updateStep = (idx: number, field: string, value: string) => {
+  const updateStep = (idx: number, field: string, value: string | boolean) => {
     setSteps(s => s.map((step, i) => i === idx ? { ...step, [field]: value } : step))
   }
 
   const saveRoute = async () => {
     const body = {
       ...form,
-      steps: steps.map((s, i) => ({ ...s, step_order: i + 1 })),
+      steps: steps.map((s, i) => ({ name: s.name, assignee_type: s.assignee_type, assignee_position_id: s.assignee_position_id, approval_type: s.approval_type, allow_dynamic_selection: s.allow_dynamic_selection, step_order: i + 1 })),
     }
     const url = editingId ? `/api/admin/routes/${editingId}` : '/api/admin/routes'
     const res = await fetch(url, {
@@ -307,38 +437,22 @@ function RoutesPageInner() {
                   <Plus className="w-3 h-3 mr-1" />追加
                 </Button>
               </div>
-              <div className="space-y-2">
-                {steps.map((step, idx) => (
-                  <div key={idx} className="flex items-center gap-2 p-2.5 border rounded-lg bg-gray-50/50">
-                    <div className={`w-6 h-6 rounded-full ${STEP_COLORS[idx % STEP_COLORS.length].bg} flex items-center justify-center shrink-0`}>
-                      <span className="text-white text-[10px] font-bold">{idx + 1}</span>
-                    </div>
-                    <Input
-                      value={step.name}
-                      onChange={e => updateStep(idx, 'name', e.target.value)}
-                      placeholder="ステップ名"
-                      className="flex-1 h-8 text-sm"
-                    />
-                    <Select value={step.assignee_type} onValueChange={v => updateStep(idx, 'assignee_type', v)}>
-                      <SelectTrigger className="w-40 h-8 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="position_in_department">所属部署の役職</SelectItem>
-                        <SelectItem value="position_in_parent_department">上位部署の役職</SelectItem>
-                        <SelectItem value="specific_employee">指定社員</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={step.assignee_position_id} onValueChange={v => updateStep(idx, 'assignee_position_id', v)}>
-                      <SelectTrigger className="w-28 h-8 text-xs"><SelectValue placeholder="役職" /></SelectTrigger>
-                      <SelectContent>
-                        {positions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <Button variant="ghost" size="sm" onClick={() => removeStep(idx)} className="h-8 w-8 p-0 text-red-400 hover:text-red-600">
-                      <X className="w-3.5 h-3.5" />
-                    </Button>
+              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleStepDragEnd}>
+                <SortableContext items={steps.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                  <div className="space-y-2">
+                    {steps.map((step, idx) => (
+                      <SortableStepItem
+                        key={step.id}
+                        step={step}
+                        idx={idx}
+                        positions={positions}
+                        updateStep={updateStep}
+                        removeStep={removeStep}
+                      />
+                    ))}
                   </div>
-                ))}
-              </div>
+                </SortableContext>
+              </DndContext>
             </div>
           </div>
           <DialogFooter>

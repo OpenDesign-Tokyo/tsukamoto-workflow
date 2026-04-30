@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
@@ -8,6 +8,7 @@ import { getDemoUserHeader } from '@/lib/auth/demo-auth'
 import { FormRenderer } from '@/components/forms/FormRenderer'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,11 +26,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Save, Send, ArrowLeft, Loader2 } from 'lucide-react'
+import { Save, Send, ArrowLeft, Loader2, Users, User, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import type { DocumentType, FormTemplate, FormSchema } from '@/lib/types/database'
 import { format } from 'date-fns'
 import { validateFormData } from '@/lib/utils/validateForm'
+
+interface RoutePreviewStep {
+  step_order: number
+  name: string
+  approval_type: string
+  allow_dynamic_selection: boolean
+  candidates: {
+    employeeId: string
+    employeeName: string
+    positionName: string
+    departmentName: string
+  }[]
+}
 
 export default function NewApplicationFormPage() {
   const params = useParams()
@@ -46,6 +60,11 @@ export default function NewApplicationFormPage() {
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [principals, setPrincipals] = useState<{ id: string; name: string; email: string }[]>([])
   const [selectedApplicantId, setSelectedApplicantId] = useState<string | null>(null)
+
+  // Route preview
+  const [routePreview, setRoutePreview] = useState<RoutePreviewStep[] | null>(null)
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false)
+  const [selectedApprovers, setSelectedApprovers] = useState<Record<string, string[]>>({})
 
   useEffect(() => {
     const fetchData = async () => {
@@ -68,7 +87,6 @@ export default function NewApplicationFormPage() {
 
         if (tmpl) {
           setTemplate(tmpl)
-          // Set default values
           const schema = tmpl.schema as unknown as FormSchema
           const defaults: Record<string, unknown> = {}
           schema.fields.forEach((f) => {
@@ -111,10 +129,59 @@ export default function NewApplicationFormPage() {
     ? principals.find(p => p.id === selectedApplicantId)?.name
     : currentUser?.name
 
+  const fetchRoutePreview = useCallback(async () => {
+    if (!docType) return
+    setIsLoadingPreview(true)
+    try {
+      const res = await fetch('/api/applications/preview-route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
+        body: JSON.stringify({
+          document_type_id: docType.id,
+          applicant_id: selectedApplicantId || undefined,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json() as RoutePreviewStep[]
+        setRoutePreview(data)
+        // Auto-select first candidate for single-type steps with multiple candidates
+        const autoSelected: Record<string, string[]> = {}
+        for (const step of data) {
+          if (step.approval_type === 'single' && step.candidates.length > 0) {
+            autoSelected[String(step.step_order)] = [step.candidates[0].employeeId]
+          }
+        }
+        setSelectedApprovers(autoSelected)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingPreview(false)
+    }
+  }, [docType, selectedApplicantId])
+
+  const handlePrepareSubmit = async () => {
+    if (!template || !docType || !currentUser) return
+
+    const schema = template.schema as unknown as FormSchema
+    const errors = validateFormData(schema, formData)
+    if (errors.length > 0) {
+      const errorMap: Record<string, string> = {}
+      errors.forEach(e => { errorMap[e.fieldId] = e.message })
+      setValidationErrors(errorMap)
+      toast.error(`入力エラーが${errors.length}件あります`)
+      return
+    }
+    setValidationErrors({})
+
+    // Fetch route preview
+    await fetchRoutePreview()
+    setShowConfirm(true)
+  }
+
   const handleSubmit = async (isDraft: boolean) => {
     if (!template || !docType || !currentUser) return
 
-    // Validate on submit (not draft)
     if (!isDraft) {
       const schema = template.schema as unknown as FormSchema
       const errors = validateFormData(schema, formData)
@@ -143,6 +210,7 @@ export default function NewApplicationFormPage() {
           title: `${docType.name} - ${applicantName}`,
           submit: !isDraft,
           ...(selectedApplicantId ? { applicant_id: selectedApplicantId } : {}),
+          ...(!isDraft && Object.keys(selectedApprovers).length > 0 ? { selected_approvers: selectedApprovers } : {}),
         }),
       })
 
@@ -188,6 +256,11 @@ export default function NewApplicationFormPage() {
   }
 
   const schema = template.schema as unknown as FormSchema
+
+  // Check if any step needs selection (single with multiple candidates)
+  const needsSelection = routePreview?.some(
+    s => s.approval_type === 'single' && s.candidates.length > 1
+  )
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -238,7 +311,7 @@ export default function NewApplicationFormPage() {
           下書き保存
         </Button>
         <Button
-          onClick={() => setShowConfirm(true)}
+          onClick={handlePrepareSubmit}
           disabled={isSubmitting}
           className="bg-[#2563eb] hover:bg-[#1d4ed8]"
         >
@@ -248,18 +321,89 @@ export default function NewApplicationFormPage() {
       </div>
 
       <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
-        <AlertDialogContent>
+        <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>申請の確認</AlertDialogTitle>
-            <AlertDialogDescription>
-              「{docType.name}」を申請します。承認ルートに従って承認者に通知されます。よろしいですか？
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>「{docType.name}」を申請します。</p>
+                {isLoadingPreview ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    承認ルートを確認中...
+                  </div>
+                ) : routePreview && (
+                  <Card>
+                    <CardHeader className="pb-2 pt-3 px-3">
+                      <CardTitle className="text-xs font-medium text-gray-500">承認ルート</CardTitle>
+                    </CardHeader>
+                    <CardContent className="px-3 pb-3 space-y-2">
+                      {routePreview.map((step, idx) => (
+                        <div key={step.step_order}>
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
+                              <span className="text-white text-[9px] font-bold">{step.step_order}</span>
+                            </div>
+                            <span className="text-sm font-medium">{step.name}</span>
+                            {step.approval_type === 'any' && (
+                              <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">OR</span>
+                            )}
+                            {step.approval_type === 'all' && (
+                              <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">AND</span>
+                            )}
+                          </div>
+                          {step.candidates.length === 0 ? (
+                            <p className="text-xs text-gray-400 ml-7">承認者なし（スキップ）</p>
+                          ) : step.approval_type === 'single' && step.candidates.length > 1 ? (
+                            <div className="ml-7 mt-1">
+                              <Select
+                                value={selectedApprovers[String(step.step_order)]?.[0] || step.candidates[0].employeeId}
+                                onValueChange={v => setSelectedApprovers(prev => ({
+                                  ...prev,
+                                  [String(step.step_order)]: [v],
+                                }))}
+                              >
+                                <SelectTrigger className="h-7 text-xs w-56">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {step.candidates.map(c => (
+                                    <SelectItem key={c.employeeId} value={c.employeeId}>
+                                      {c.employeeName}（{c.positionName}）
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : (
+                            <div className="ml-7 space-y-0.5">
+                              {step.candidates.map(c => (
+                                <div key={c.employeeId} className="flex items-center gap-1.5 text-xs text-gray-600">
+                                  <User className="w-3 h-3 text-gray-400" />
+                                  {c.employeeName}
+                                  <span className="text-gray-400">（{c.positionName}）</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {idx < routePreview.length - 1 && (
+                            <div className="flex justify-center my-1">
+                              <ChevronRight className="w-3 h-3 text-gray-300 rotate-90" />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => handleSubmit(false)}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isLoadingPreview}
             >
               {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               申請する

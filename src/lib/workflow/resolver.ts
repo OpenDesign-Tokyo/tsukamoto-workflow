@@ -3,7 +3,7 @@ import type { ResolvedApprover } from '@/lib/types/workflow'
 import type { ApprovalRouteStep } from '@/lib/types/database'
 
 /**
- * 申請者の情報と承認ステップ定義から、具体的な承認者を解決する。
+ * 申請者の情報と承認ステップ定義から、全承認者候補を解決する（複数候補対応）。
  *
  * 解決ロジック:
  * 1. position_in_department: 申請者の部署→親部署方向に指定役職を検索
@@ -12,16 +12,15 @@ import type { ApprovalRouteStep } from '@/lib/types/database'
  * 4. department_head: 申請者の部署長（最上位役職者）
  * 5. applicant_manager: 申請者の直属上長（同部署で1つ上の役職）
  */
-export async function resolveApprover(
+export async function resolveApprovers(
   step: ApprovalRouteStep,
   applicantId: string,
   applicantDepartmentId: string
-): Promise<ResolvedApprover | null> {
+): Promise<ResolvedApprover[]> {
   const supabase = createAdminClient()
 
   switch (step.assignee_type) {
     case 'position_in_department': {
-      // Build the department ancestor chain (current → parent → grandparent → ...)
       const deptChain: string[] = [applicantDepartmentId]
       let nextParentId: string | null = applicantDepartmentId
       for (let i = 0; i < 10 && nextParentId; i++) {
@@ -38,7 +37,6 @@ export async function resolveApprover(
         }
       }
 
-      // Search each department in the chain for the target position
       for (const deptId of deptChain) {
         const { data } = await supabase
           .from('employee_assignments')
@@ -51,26 +49,26 @@ export async function resolveApprover(
           .eq('position_id', step.assignee_position_id!)
           .eq('is_active', true)
           .neq('employee_id', applicantId)
-          .maybeSingle()
 
-        if (data?.employee) {
-          const emp = data.employee as unknown as { id: string; name: string }
-          const pos = data.position as unknown as { name: string }
-          const deptInfo = data.department as unknown as { id: string; name: string }
-          return {
-            employeeId: emp.id,
-            employeeName: emp.name,
-            positionName: pos.name,
-            departmentName: deptInfo.name,
-            isProxy: false,
-          }
+        if (data?.length) {
+          return data.map(d => {
+            const emp = d.employee as unknown as { id: string; name: string }
+            const pos = d.position as unknown as { name: string }
+            const deptInfo = d.department as unknown as { id: string; name: string }
+            return {
+              employeeId: emp.id,
+              employeeName: emp.name,
+              positionName: pos.name,
+              departmentName: deptInfo.name,
+              isProxy: false,
+            }
+          })
         }
       }
-      return null
+      return []
     }
 
     case 'position_in_parent_department': {
-      // Get parent department
       const { data: dept } = await supabase
         .from('departments')
         .select('parent_id')
@@ -78,15 +76,13 @@ export async function resolveApprover(
         .maybeSingle()
 
       if (!dept?.parent_id) {
-        // If no parent, search in same department
-        return resolveApprover(
+        return resolveApprovers(
           { ...step, assignee_type: 'position_in_department' },
           applicantId,
           applicantDepartmentId
         )
       }
 
-      // Find the approver with the target position going up the tree
       let searchDeptId: string | null = dept.parent_id
       while (searchDeptId) {
         const { data } = await supabase
@@ -100,32 +96,30 @@ export async function resolveApprover(
           .eq('position_id', step.assignee_position_id!)
           .eq('is_active', true)
           .neq('employee_id', applicantId)
-          .maybeSingle()
 
-        if (data?.employee) {
-          const emp = data.employee as unknown as { id: string; name: string }
-          const pos = data.position as unknown as { name: string }
-          const deptInfo = data.department as unknown as { id: string; name: string; parent_id: string | null }
-          return {
-            employeeId: emp.id,
-            employeeName: emp.name,
-            positionName: pos.name,
-            departmentName: deptInfo.name,
-            isProxy: false,
-          }
+        if (data?.length) {
+          return data.map(d => {
+            const emp = d.employee as unknown as { id: string; name: string }
+            const pos = d.position as unknown as { name: string }
+            const deptInfo = d.department as unknown as { id: string; name: string; parent_id: string | null }
+            return {
+              employeeId: emp.id,
+              employeeName: emp.name,
+              positionName: pos.name,
+              departmentName: deptInfo.name,
+              isProxy: false,
+            }
+          })
         }
 
-        // Go up another level
         const { data: parentDept } = await supabase
           .from('departments')
           .select('parent_id')
           .eq('id', searchDeptId)
           .maybeSingle()
-
         searchDeptId = parentDept?.parent_id || null
       }
-
-      return null
+      return []
     }
 
     case 'specific_employee': {
@@ -135,7 +129,7 @@ export async function resolveApprover(
         .eq('id', step.assignee_employee_id!)
         .maybeSingle()
 
-      if (!data) return null
+      if (!data) return []
 
       const { data: assignment } = await supabase
         .from('employee_assignments')
@@ -150,13 +144,13 @@ export async function resolveApprover(
 
       const pos = assignment?.position as unknown as { name: string } | null
       const dept = assignment?.department as unknown as { name: string } | null
-      return {
+      return [{
         employeeId: data.id,
         employeeName: data.name,
         positionName: pos?.name || '',
         departmentName: dept?.name || '',
         isProxy: false,
-      }
+      }]
     }
 
     case 'department_head': {
@@ -170,24 +164,23 @@ export async function resolveApprover(
         .eq('department_id', applicantDepartmentId)
         .eq('is_active', true)
         .neq('employee_id', applicantId)
-        .order('position_id')  // will need to sort by rank
+        .order('position_id')
         .limit(1)
 
-      if (!data?.[0]?.employee) return null
+      if (!data?.[0]?.employee) return []
       const emp = data[0].employee as unknown as { id: string; name: string }
       const pos = data[0].position as unknown as { name: string }
       const dept = data[0].department as unknown as { name: string }
-      return {
+      return [{
         employeeId: emp.id,
         employeeName: emp.name,
         positionName: pos.name,
         departmentName: dept.name,
         isProxy: false,
-      }
+      }]
     }
 
     case 'applicant_manager': {
-      // Same department, one rank above
       const { data: applicantAssignment } = await supabase
         .from('employee_assignments')
         .select('position:positions(rank)')
@@ -209,9 +202,8 @@ export async function resolveApprover(
         .eq('is_active', true)
         .neq('employee_id', applicantId)
 
-      if (!managers?.length) return null
+      if (!managers?.length) return []
 
-      // Find closest higher rank
       const sorted = managers
         .filter(m => {
           const rank = (m.position as unknown as { rank: number })?.rank || 0
@@ -223,17 +215,29 @@ export async function resolveApprover(
           return ra - rb
         })
 
-      if (!sorted[0]) return null
+      if (!sorted[0]) return []
       const emp = sorted[0].employee as unknown as { id: string; name: string }
       const pos = sorted[0].position as unknown as { name: string }
       const dept = sorted[0].department as unknown as { name: string }
-      return {
+      return [{
         employeeId: emp.id,
         employeeName: emp.name,
         positionName: pos.name,
         departmentName: dept.name,
         isProxy: false,
-      }
+      }]
     }
   }
+}
+
+/**
+ * 後方互換: 最初の候補者のみ返す。
+ */
+export async function resolveApprover(
+  step: ApprovalRouteStep,
+  applicantId: string,
+  applicantDepartmentId: string
+): Promise<ResolvedApprover | null> {
+  const candidates = await resolveApprovers(step, applicantId, applicantDepartmentId)
+  return candidates[0] || null
 }

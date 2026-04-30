@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Check, X, Loader2 } from 'lucide-react'
+import { Check, X, Loader2, User } from 'lucide-react'
+import { getDemoUserHeader } from '@/lib/auth/demo-auth'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,9 +16,24 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 
+interface NextStepCandidate {
+  employeeId: string
+  employeeName: string
+  positionName: string
+  departmentName: string
+}
+
+interface NextStepInfo {
+  needsSelection: boolean
+  stepName?: string
+  stepOrder?: number
+  approvalType?: string
+  candidates: NextStepCandidate[]
+}
+
 interface Props {
   applicationId: string
-  onApprove: (comment?: string) => Promise<void>
+  onApprove: (comment?: string, selectedNextApprovers?: string[]) => Promise<void>
   onReject: (comment: string) => Promise<void>
   disabled?: boolean
 }
@@ -29,13 +45,48 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
   const [showApproveDialog, setShowApproveDialog] = useState(false)
   const [showRejectDialog, setShowRejectDialog] = useState(false)
 
+  // Dynamic selection state
+  const [nextStepInfo, setNextStepInfo] = useState<NextStepInfo | null>(null)
+  const [isLoadingCandidates, setIsLoadingCandidates] = useState(false)
+  const [selectedNextApprovers, setSelectedNextApprovers] = useState<string[]>([])
+
   const isProcessing = isApproving || isRejecting
+
+  const fetchNextStepCandidates = useCallback(async () => {
+    setIsLoadingCandidates(true)
+    try {
+      const res = await fetch(`/api/applications/${applicationId}/next-step-candidates`, {
+        headers: getDemoUserHeader(),
+      })
+      if (res.ok) {
+        const data = await res.json() as NextStepInfo
+        setNextStepInfo(data)
+        if (data.needsSelection && data.candidates.length > 0) {
+          // Pre-select all candidates
+          setSelectedNextApprovers(data.candidates.map(c => c.employeeId))
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingCandidates(false)
+    }
+  }, [applicationId])
+
+  const handleApproveClick = async () => {
+    // Fetch next step candidates first
+    await fetchNextStepCandidates()
+    setShowApproveDialog(true)
+  }
 
   const handleApprove = async () => {
     setIsApproving(true)
     setShowApproveDialog(false)
     try {
-      await onApprove(comment || undefined)
+      const nextApprovers = nextStepInfo?.needsSelection && selectedNextApprovers.length > 0
+        ? selectedNextApprovers
+        : undefined
+      await onApprove(comment || undefined, nextApprovers)
     } finally {
       setIsApproving(false)
     }
@@ -50,6 +101,12 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
     } finally {
       setIsRejecting(false)
     }
+  }
+
+  const toggleNextApprover = (id: string) => {
+    setSelectedNextApprovers(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
   }
 
   if (isProcessing) {
@@ -85,7 +142,7 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
 
       <div className="flex gap-3">
         <Button
-          onClick={() => setShowApproveDialog(true)}
+          onClick={handleApproveClick}
           className="bg-green-600 hover:bg-green-700 flex-1"
           disabled={disabled}
         >
@@ -113,13 +170,49 @@ export function ApprovalActions({ applicationId, onApprove, onReject, disabled }
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>承認の確認</AlertDialogTitle>
-            <AlertDialogDescription>
-              この申請を承認します。よろしいですか？
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>この申請を承認します。よろしいですか？</p>
+                {isLoadingCandidates && (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    次のステップを確認中...
+                  </div>
+                )}
+                {nextStepInfo?.needsSelection && nextStepInfo.candidates.length > 0 && (
+                  <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                    <p className="text-sm font-medium text-gray-700">
+                      次のステップ「{nextStepInfo.stepName}」の承認者を選択してください
+                    </p>
+                    <div className="space-y-1.5">
+                      {nextStepInfo.candidates.map(c => (
+                        <label
+                          key={c.employeeId}
+                          className="flex items-center gap-2 p-2 rounded-md hover:bg-white cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedNextApprovers.includes(c.employeeId)}
+                            onChange={() => toggleNextApprover(c.employeeId)}
+                            className="rounded border-gray-300"
+                          />
+                          <User className="w-3.5 h-3.5 text-gray-400" />
+                          <span className="text-sm">{c.employeeName}</span>
+                          <span className="text-xs text-gray-400">（{c.positionName}・{c.departmentName}）</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction onClick={handleApprove}>
+            <AlertDialogAction
+              onClick={handleApprove}
+              disabled={isLoadingCandidates || (nextStepInfo?.needsSelection && selectedNextApprovers.length === 0)}
+            >
               承認する
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
 import { writeAuditLog } from '@/lib/audit/logger'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!(await requireAdmin(req))) return forbidden()
+
   const supabase = createAdminClient()
   const { data, error } = await supabase
     .from('proxy_settings')
@@ -18,13 +21,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const adminId = await requireAdmin(req)
+  if (!adminId) return forbidden()
+
   const supabase = createAdminClient()
   const body = await req.json()
-  const userId = req.headers.get('x-demo-user-id')
-
-  if (!userId) {
-    return NextResponse.json({ error: 'User ID required' }, { status: 401 })
-  }
 
   const { data, error } = await supabase
     .from('proxy_settings')
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   await writeAuditLog({
-    actorId: userId,
+    actorId: adminId,
     action: 'proxy.create',
     targetType: 'proxy_setting',
     targetId: data.id,

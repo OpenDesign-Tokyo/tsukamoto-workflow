@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
 
 // Update display order of templates by updating their document_type's sort_order
 export async function PUT(req: NextRequest) {
+  if (!(await requireAdmin(req))) return forbidden()
+
   const supabase = createAdminClient()
   const body = await req.json()
 
