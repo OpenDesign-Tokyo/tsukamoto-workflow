@@ -97,6 +97,13 @@ export interface FormField {
   allowExcelPaste?: boolean
   formula?: string
   width?: string
+  templateConfig?: {
+    title?: string
+    headerFields?: { label: string }[]
+    footerFields?: { label: string }[]
+    dataRows?: number
+    taxNote?: string
+  }
 }
 
 export interface TableColumn {

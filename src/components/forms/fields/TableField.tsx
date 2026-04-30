@@ -38,7 +38,8 @@ export function TableField({ field, value, onChange, readOnly }: Props) {
       const XLSX = await import('xlsx')
       const data = await file.arrayBuffer()
       const wb = XLSX.read(data, { type: 'array' })
-      const ws = wb.Sheets[wb.SheetNames[0]]
+      // Prefer "データ入力" sheet (import-compatible) if it exists
+      const ws = wb.Sheets['データ入力'] || wb.Sheets[wb.SheetNames[0]]
       const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown as unknown[][]
 
       if (!jsonData.length) return

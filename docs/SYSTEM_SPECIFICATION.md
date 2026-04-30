@@ -21,6 +21,8 @@
 | 認証 | Microsoft Entra ID (Azure AD) SSO |
 | 通知 | Microsoft Teams (Power Automate Webhook + Adaptive Card) |
 | PDF出力 | カスタム実装 |
+| Excel出力 | xlsx（SheetJS） |
+| ドラッグ&ドロップ | @dnd-kit/core, @dnd-kit/sortable |
 | ホスティング | Vercel |
 | アイコン | Lucide React |
 
@@ -43,6 +45,9 @@
 - API リクエストには `X-Demo-User-Id` ヘッダーでユーザーIDを送信
 - 各APIエンドポイントでユーザーの権限を検証
 - 管理者権限は `employees.is_admin = true` で判定
+- 全管理者APIは共通ユーティリティ `requireAdmin(req)` で認可チェック（`lib/auth/require-admin.ts`）
+  - ヘッダーからユーザーIDを取得し、`is_admin = true` を検証
+  - 非管理者の場合は `403 Forbidden` を返却
 
 ---
 
@@ -68,7 +73,7 @@
 |------|------|------|
 | 組織図 | `/admin/org` | 部署の階層構造管理 |
 | ユーザー管理 | `/admin/users` | 社員の登録・編集・部署/役職割当 |
-| 承認ルート | `/admin/routes` | 承認ルートテンプレートの設定 |
+| 承認ルート | `/admin/routes` | 承認ルートテンプレートの設定（ステップのD&D並替え、承認タイプ設定） |
 | フォーム管理 | `/admin/forms` | フォームテンプレートの作成・編集・バージョン管理 |
 | 代理設定 | `/admin/proxy` | 代理申請の権限設定 |
 | MS365同期 | `/admin/sync` | Microsoft Graph APIによる組織データ同期 |
@@ -101,7 +106,7 @@
 | `select` | プルダウン選択 | 選択肢をオプションで定義 |
 | `textarea` | 複数行テキスト | `rows` で行数指定 |
 | `currency` | 金額入力 | カンマ区切り表示 |
-| `table` | 明細テーブル | 行の追加・削除、列ごとに型定義 |
+| `table` | 明細テーブル | 行の追加・削除、列ごとに型定義、Excelテンプレートダウンロード、D&Dファイルインポート |
 | `formula` | 計算フィールド | 他フィールドの値から自動計算（読み取り専用） |
 | `file` | ファイル添付 | |
 
@@ -125,7 +130,7 @@
 
 **承認ルートの構成要素:**
 - **ルートテンプレート**: ルート名、対象書類種別、有効/無効、条件
-- **承認ステップ**: 順番、ステップ名、承認者の決定方式、承認タイプ
+- **承認ステップ**: 順番（D&Dで並替え可能）、ステップ名、承認者の決定方式、承認タイプ（単独/OR/AND）、動的選択フラグ
 
 ### 5.3 金額ベースの承認ルート自動選択
 申請内の金額に応じて承認ルートが自動選択されます。
@@ -166,21 +171,31 @@
 #### 提出時（`submitApplication`）
 1. 申請情報と承認ルートのステップを取得
 2. 管理者の自己申請の場合 → 1ステップの自己承認
-3. 各ステップについて承認者を解決（組織階層に基づく）
-4. 解決できないステップは自動スキップ
-5. 最初の有効なステップの承認者にTeams通知を送信
-6. ステータスを `in_approval` に更新
+3. 各ステップについて承認者候補を解決（`resolveApprovers` で全候補を取得）
+4. 申請者が事前に選択した承認者（`selected_approvers`）がある場合はそれを優先
+5. 承認タイプに応じて承認レコードを作成:
+   - `single`: 候補者の中から1名のレコードを作成
+   - `any` / `all`: 全候補者分のレコードを作成
+6. 解決できないステップは自動スキップ
+7. 最初の有効なステップの承認者にTeams通知を送信
+8. ステータスを `in_approval` に更新
 
 #### 承認時（`approveApplication`）
 1. 承認レコードを `approved` に更新
-2. 最終ステップの場合 → ステータスを `approved` に更新、申請者に通知
-3. 次のステップがある場合 → 次の承認者を解決して通知
-4. 解決できないステップは自動スキップ
+2. 承認タイプ別の処理:
+   - **`single`**: そのまま次ステップへ進行
+   - **`any`（OR承認）**: 同一ステップの残りのpendingレコードを `skipped`（「他の承認者が承認済み」）に更新し、次ステップへ
+   - **`all`（AND承認）**: 同一ステップの全レコードが `approved` か確認。未完了なら `waitingForOthers: true` を返して待機
+3. 最終ステップの場合 → ステータスを `approved` に更新、申請者に通知
+4. 次のステップがある場合 → 承認者を解決して通知
+5. 前承認者が次ステップの承認者を選択した場合（`selectedNextApprovers`）、その指定を使用
+6. 解決できないステップは自動スキップ
 
 #### 差戻し時（`rejectApplication`）
 1. 承認レコードを `rejected` に更新（コメント必須）
-2. ステータスを `rejected` に更新
-3. 申請者に差戻し通知を送信
+2. 同一ステップの残りのpendingレコードを `skipped`（「他の承認者が差戻し」）に更新
+3. ステータスを `rejected` に更新
+4. 申請者に差戻し通知を送信
 
 #### 取下げ時（`withdrawApplication`）
 1. 申請者本人（または代理申請者）のみ実行可能
@@ -189,11 +204,25 @@
 4. 承認待ちの承認者に取下げ通知を送信
 
 ### 5.6 承認タイプ
-| タイプ | 説明 |
-|--------|------|
-| `single` | 1名の承認者が承認すれば次へ進む |
-| `all` | 全ての承認者が承認する必要がある |
-| `any` | いずれか1名が承認すれば次へ進む |
+| タイプ | 説明 | 動作 |
+|--------|------|------|
+| `single` | 1名の承認者 | 候補者から1名を選出（申請者選択 or 自動） |
+| `any` | OR承認（いずれか1名） | 全候補者にレコード作成、1名承認で次へ、残りは自動スキップ |
+| `all` | AND承認（全員必須） | 全候補者にレコード作成、全員が承認するまで待機 |
+
+### 5.7 承認者の選択機能
+
+#### 申請時の承認者選択
+- 申請提出前に承認ルートのプレビューを表示（各ステップの候補者一覧）
+- `single`タイプで候補者が複数いるステップ → ドロップダウンで1名選択
+- `any` / `all`タイプ → 全候補者を表示（選択不要）
+- 選択結果は `applications.selected_approvers` に保存
+
+#### 動的承認者選択（`allow_dynamic_selection`）
+- 承認ステップに `allow_dynamic_selection = true` を設定可能
+- 前ステップの承認者が承認時に、次ステップの承認者を候補リストから選択
+- 選択結果は `approval_records.selected_next_approvers` に保存
+- 次ステップ作成時に選択された承認者のみレコードを作成
 
 ---
 
@@ -302,6 +331,8 @@ Microsoft Graph APIを使用して、Entra ID（Azure AD）からユーザー・
 | POST | `/api/applications/[id]/approve` | 承認実行 |
 | POST | `/api/applications/[id]/reject` | 差戻し実行（コメント必須） |
 | POST | `/api/applications/[id]/withdraw` | 取下げ実行 |
+| POST | `/api/applications/preview-route` | 承認ルートプレビュー（候補者一覧） |
+| GET | `/api/applications/[id]/next-step-candidates` | 次ステップの承認者候補取得 |
 
 ### 9.2 代理関連
 | メソッド | エンドポイント | 説明 |
@@ -428,6 +459,7 @@ Microsoft Graph APIを使用して、Entra ID（Azure AD）からユーザー・
 | assignee_position_id | uuid | 指定役職ID（role系タイプ用） |
 | assignee_employee_id | uuid | 指定社員ID（specific_employee用） |
 | approval_type | text | 承認タイプ（single/all/any） |
+| allow_dynamic_selection | boolean | 動的承認者選択フラグ（前承認者が次ステップの対象者を選択） |
 | can_skip | boolean | スキップ可能フラグ |
 | is_stamp_required | boolean | 電子印必須フラグ |
 
@@ -451,6 +483,7 @@ Microsoft Graph APIを使用して、Entra ID（Azure AD）からユーザー・
 | submitted_at | timestamp | 提出日時 |
 | approved_at | timestamp | 決裁完了日時 |
 | archived_at | timestamp | アーカイブ日時 |
+| selected_approvers | jsonb | 申請時に選択された承認者（ステップ→承認者IDリスト） |
 | sharepoint_url | text | SharePointアーカイブURL |
 
 #### approval_records（承認レコード）
@@ -466,6 +499,7 @@ Microsoft Graph APIを使用して、Entra ID（Azure AD）からユーザー・
 | action | text | アクション（pending/approved/rejected/skipped） |
 | comment | text | コメント |
 | acted_at | timestamp | 処理日時 |
+| selected_next_approvers | jsonb | 次ステップ承認者の動的選択結果（承認者IDリスト） |
 | teams_notification_sent | boolean | Teams通知送信済みフラグ |
 
 ### 10.5 その他テーブル
@@ -529,12 +563,28 @@ Microsoft Graph APIを使用して、Entra ID（Azure AD）からユーザー・
 
 ---
 
-## 11. PDF出力
+## 11. 出力機能
 
-### 11.1 機能
+### 11.1 PDF出力
 - 決裁完了（`approved`）の申請をPDFとしてダウンロード
 - フォームデータをテンプレートに沿ってレンダリング
 - 申請詳細画面の「PDF」ボタンから出力
+
+### 11.2 Excel出力
+- 決裁完了（`approved`）の申請をExcel（.xlsx）としてダウンロード
+- クライアントサイドで `xlsx`（SheetJS）ライブラリにより生成
+- 申請詳細画面の「Excel」ボタンから出力
+
+**出力構成:**
+- **Sheet 1「申請内容」**: メタ情報（申請番号・申請者・提出日等）+ フォームフィールド（キー・値の行形式）
+- **Sheet 2+**: テーブルフィールドごとに1シート（ヘッダー行 + データ行）
+- **Sheet「承認履歴」**: ステップ名・承認者・アクション・コメント・処理日時
+
+### 11.3 明細テンプレートExcel
+- テーブルフィールドの列定義からExcelテンプレートを自動生成
+- ヘッダー行のみの .xlsx ファイル（formula列は除外）
+- テーブルフィールドの「テンプレート」ボタンからダウンロード
+- ダウンロードしたテンプレートにデータ入力後、D&Dでインポート可能
 
 ---
 
