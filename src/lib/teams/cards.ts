@@ -10,6 +10,19 @@ interface CardContext {
   documentTypeName?: string
   currentStep?: number
   totalSteps?: number
+  /**
+   * Phase 1.2: Teams Adaptive Card で承認完結。
+   *
+   * When provided AND `ctx.type === 'approval_request'`, render inline
+   * `Action.Execute` buttons that let the approver act without leaving Teams.
+   * Power Automate intercepts the action and POSTs to /api/teams/action.
+   *
+   * Set to null/undefined to fall back to the legacy "詳細を見る" link-only card.
+   */
+  approverActions?: {
+    applicationId: string
+    approverId: string
+  }
 }
 
 const TYPE_LABELS: Record<NotificationType, string> = {
@@ -77,12 +90,59 @@ export function buildAdaptiveCard(ctx: CardContext) {
         color: 'accent',
       },
     ],
-    actions: [
-      {
-        type: 'Action.OpenUrl',
-        title: '詳細を見る',
-        url: fullUrl,
-      },
-    ],
+    actions: buildActions(ctx, fullUrl),
   }
+}
+
+function buildActions(ctx: CardContext, fullUrl: string) {
+  const openUrl = { type: 'Action.OpenUrl' as const, title: '詳細を見る', url: fullUrl }
+
+  // Only attach approve/reject buttons for approval requests with an approver context.
+  if (ctx.type !== 'approval_request' || !ctx.approverActions) {
+    return [openUrl]
+  }
+
+  const { applicationId, approverId } = ctx.approverActions
+
+  // Adaptive Card 1.5 Action.Execute — Power Automate "When a card action is
+  // executed" trigger picks this up and forwards to /api/teams/action.
+  return [
+    {
+      type: 'Action.Execute' as const,
+      title: '✅ 承認',
+      style: 'positive' as const,
+      verb: 'approve',
+      data: { verb: 'approve', applicationId, approverId },
+    },
+    {
+      type: 'Action.ShowCard' as const,
+      title: '🔙 差戻し',
+      card: {
+        type: 'AdaptiveCard',
+        $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+        version: '1.5',
+        body: [
+          {
+            type: 'Input.Text',
+            id: 'comment',
+            label: '差戻しコメント',
+            placeholder: '差戻し理由を入力してください',
+            isMultiline: true,
+            isRequired: true,
+            errorMessage: 'コメントは必須です',
+          },
+        ],
+        actions: [
+          {
+            type: 'Action.Execute',
+            title: '差戻しを確定',
+            style: 'destructive',
+            verb: 'reject',
+            data: { verb: 'reject', applicationId, approverId },
+          },
+        ],
+      },
+    },
+    openUrl,
+  ]
 }

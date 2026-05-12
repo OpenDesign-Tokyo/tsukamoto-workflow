@@ -10,8 +10,24 @@ import { CurrencyField } from './fields/CurrencyField'
 import { TableField } from './fields/TableField'
 import { FormulaField } from './fields/FormulaField'
 import { FileField } from './fields/FileField'
+import { VendorField } from './fields/VendorField'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { FormSchema, FormField } from '@/lib/types/database'
+import type { FormSchema, FormField, Vendor } from '@/lib/types/database'
+
+/** Compute the partial update produced by selecting a vendor in a vendor_select field. */
+export function vendorFieldUpdates(field: FormField, vendor: Vendor | null): Record<string, unknown> {
+  const updates: Record<string, unknown> = { [field.id]: vendor?.id ?? '' }
+  if (field.vendorAutoFill && vendor) {
+    for (const af of field.vendorAutoFill) {
+      const raw = vendor[af.vendorKey]
+      updates[af.fieldId] = raw ?? ''
+    }
+  } else if (field.vendorAutoFill && !vendor) {
+    // Selecting "clear" wipes the auto-filled fields too
+    for (const af of field.vendorAutoFill) updates[af.fieldId] = ''
+  }
+  return updates
+}
 
 interface Props {
   schema: FormSchema
@@ -147,6 +163,19 @@ export function FormRenderer({ schema, formData, onChange, readOnly = false, err
       }
       case 'file':
         return <FileField key={field.id} field={field} readOnly={readOnly} />
+      case 'vendor_select':
+        return (
+          <VendorField
+            key={field.id}
+            field={field}
+            value={value as string}
+            onSelect={(vendor) => {
+              if (!onChange) return
+              onChange({ ...formData, ...vendorFieldUpdates(field, vendor) })
+            }}
+            readOnly={readOnly}
+          />
+        )
       default:
         return null
     }

@@ -38,6 +38,11 @@ export async function sendWorkflowNotification(params: NotificationParams) {
     .maybeSingle()
 
   if (recipient) {
+    // For approval requests, embed inline 承認 / 差戻し buttons so the approver can act from Teams.
+    const approverActions = params.type === 'approval_request'
+      ? { applicationId: params.applicationId, approverId: params.recipientId }
+      : undefined
+
     const teamsResult = await sendTeamsNotification(recipient.email, {
       title: params.title,
       body: params.body,
@@ -48,6 +53,7 @@ export async function sendWorkflowNotification(params: NotificationParams) {
       documentTypeName: params.documentTypeName,
       currentStep: params.currentStep,
       totalSteps: params.totalSteps,
+      approverActions,
     })
 
     // Track Teams delivery if actually sent (not mock)

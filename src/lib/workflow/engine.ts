@@ -1,10 +1,21 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveApprover, resolveApprovers } from './resolver'
 import { sendWorkflowNotification } from './notifications'
+import { writeAuditLog } from '@/lib/audit/logger'
 import type { WorkflowSubmitResult, WorkflowApproveResult, WorkflowRejectResult, ResolvedApprover } from '@/lib/types/workflow'
 import type { ApprovalRouteStep } from '@/lib/types/database'
 
 type Supabase = ReturnType<typeof createAdminClient>
+
+// Hidden actor used when an unexpected exception happens — the actor is unknown
+// from the engine level, so we record a sentinel value the audit reader can filter on.
+const SYSTEM_ACTOR = '00000000-0000-0000-0000-000000000000'
+
+function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (typeof e === 'string') return e
+  return JSON.stringify(e)
+}
 
 /**
  * Helper: activate a step by creating approval_records and sending notifications.
@@ -230,7 +241,7 @@ async function advanceToNextStep(
  * 4. approval_records に pending で INSERT
  * 5. 通知送信
  */
-export async function submitApplication(
+async function _submitApplicationCore(
   applicationId: string,
   selectedApprovers?: Record<string, string[]>,
 ): Promise<WorkflowSubmitResult> {
@@ -397,7 +408,7 @@ export async function submitApplication(
  * - any: 1人承認 → 残りpendingをskipped → 次ステップへ
  * - all: 全員承認済みか確認 → 未完了なら待機、完了なら次ステップへ
  */
-export async function approveApplication(
+async function _approveApplicationCore(
   applicationId: string,
   approverId: string,
   comment?: string,
@@ -486,7 +497,7 @@ export async function approveApplication(
  * 差戻し時（multi-approver対応）:
  * 1人が差戻し → 同ステップの他のpending recordsをskipped → 申請却下
  */
-export async function rejectApplication(
+async function _rejectApplicationCore(
   applicationId: string,
   approverId: string,
   comment: string
@@ -556,4 +567,76 @@ export async function rejectApplication(
   })
 
   return { success: true }
+}
+
+// ───────────────────── Public wrappers with error handling ─────────────────────
+// Wrap each workflow operation in try/catch. On unexpected failure we record an
+// audit log entry and return a structured error result instead of letting the
+// exception bubble up to the API route (which would result in a generic 500).
+//
+// NOTE: This is a defensive net, not transactional atomicity. For true atomicity
+// (Phase 0.1 in IMPLEMENTATION_ROADMAP.md) the operations need to be moved into
+// Postgres RPC functions where the writes can share a single transaction.
+
+export async function submitApplication(
+  applicationId: string,
+  selectedApprovers?: Record<string, string[]>,
+): Promise<WorkflowSubmitResult> {
+  try {
+    return await _submitApplicationCore(applicationId, selectedApprovers)
+  } catch (e) {
+    const message = errorMessage(e)
+    console.error('[workflow.submit] failed:', message, e)
+    await writeAuditLog({
+      actorId: SYSTEM_ACTOR,
+      action: 'application.submit',
+      targetType: 'application',
+      targetId: applicationId,
+      metadata: { error: message, phase: 'engine.submitApplication' },
+    })
+    return { success: false, applicationId, applicationNumber: '', error: message }
+  }
+}
+
+export async function approveApplication(
+  applicationId: string,
+  approverId: string,
+  comment?: string,
+  selectedNextApprovers?: string[],
+): Promise<WorkflowApproveResult> {
+  try {
+    return await _approveApplicationCore(applicationId, approverId, comment, selectedNextApprovers)
+  } catch (e) {
+    const message = errorMessage(e)
+    console.error('[workflow.approve] failed:', message, e)
+    await writeAuditLog({
+      actorId: approverId || SYSTEM_ACTOR,
+      action: 'application.approve',
+      targetType: 'application',
+      targetId: applicationId,
+      metadata: { error: message, phase: 'engine.approveApplication' },
+    })
+    return { success: false, isCompleted: false, error: message }
+  }
+}
+
+export async function rejectApplication(
+  applicationId: string,
+  approverId: string,
+  comment: string,
+): Promise<WorkflowRejectResult> {
+  try {
+    return await _rejectApplicationCore(applicationId, approverId, comment)
+  } catch (e) {
+    const message = errorMessage(e)
+    console.error('[workflow.reject] failed:', message, e)
+    await writeAuditLog({
+      actorId: approverId || SYSTEM_ACTOR,
+      action: 'application.reject',
+      targetType: 'application',
+      targetId: applicationId,
+      metadata: { error: message, phase: 'engine.rejectApplication' },
+    })
+    return { success: false, error: message }
+  }
 }

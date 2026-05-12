@@ -15,6 +15,7 @@ import {
   FileSpreadsheet,
   UserCheck,
   Cloud,
+  Handshake,
   Menu,
   X,
 } from 'lucide-react'
@@ -32,6 +33,7 @@ const mainNav = [
 const adminNav = [
   { label: '組織図', href: '/admin/org', icon: Building2 },
   { label: 'ユーザー', href: '/admin/users', icon: Users },
+  { label: '取引先マスタ', href: '/admin/vendors', icon: Handshake },
   { label: '承認ルート', href: '/admin/routes', icon: Route },
   { label: 'フォーム', href: '/admin/forms', icon: FileSpreadsheet },
   { label: '代理設定', href: '/admin/proxy', icon: UserCheck },

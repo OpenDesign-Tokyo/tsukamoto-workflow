@@ -54,6 +54,146 @@ export async function generateTableTemplate(field: FormField): Promise<ArrayBuff
 
   let row = 1
 
+  /* ── Top banner: company name + document title + approval seals ───── */
+  // Renders the corporate-form aesthetic that ツカモトコーポレーション's existing
+  // paper 注文書 / 支払依頼書 use: large title centered, company name on the
+  // top-right, and N seal (印鑑) boxes for 課長 / 部長 / 事業部長.
+  const seals = config?.approvalSeals ?? 0
+  const hasBanner = !!(config?.documentTitle || config?.companyName || config?.companyLogoPlaceholder || seals > 0)
+
+  if (hasBanner) {
+    const bannerRow = ws.getRow(row)
+    bannerRow.height = 44
+
+    // Left side: optional logo placeholder cell
+    if (config?.companyLogoPlaceholder) {
+      const logoCell = bannerRow.getCell(1)
+      logoCell.value = '[ LOGO ]'
+      logoCell.alignment = { horizontal: 'center', vertical: 'middle' }
+      logoCell.font = { size: 9, color: { argb: 'FF888888' }, italic: true }
+      logoCell.border = ALL_BORDERS
+    }
+
+    // Center: document title (e.g., "注文書")
+    if (config?.documentTitle) {
+      // Reserve a few columns for the title; merge them. Leave space for seals on the right.
+      const titleStartCol = config.companyLogoPlaceholder ? 2 : 1
+      const titleEndCol = Math.max(titleStartCol + 1, totalCols - seals * 2)
+      if (titleEndCol > titleStartCol) {
+        ws.mergeCells(row, titleStartCol, row, titleEndCol)
+      }
+      const titleCell = bannerRow.getCell(titleStartCol)
+      titleCell.value = config.documentTitle
+      titleCell.font = { bold: true, size: 22, color: { argb: 'FF1F2937' } }
+      titleCell.alignment = { horizontal: 'center', vertical: 'middle' }
+    }
+
+    // Right side: approval seal boxes (印鑑欄)
+    // Each seal is a single cell with a small label above.
+    if (seals > 0) {
+      const sealStartCol = totalCols - seals * 2 + 1
+      for (let s = 0; s < seals; s++) {
+        const col = sealStartCol + s * 2
+        // Two adjacent cells: label header on top, seal box below — but for now
+        // we render the seal box only and use the next row for the label.
+        const sealCell = bannerRow.getCell(col)
+        sealCell.value = '印'
+        sealCell.font = { size: 16, color: { argb: 'FFAAAAAA' } }
+        sealCell.alignment = { horizontal: 'center', vertical: 'middle' }
+        sealCell.border = {
+          top: { style: 'medium', color: { argb: 'FF666666' } },
+          bottom: { style: 'medium', color: { argb: 'FF666666' } },
+          left: { style: 'medium', color: { argb: 'FF666666' } },
+          right: { style: 'medium', color: { argb: 'FF666666' } },
+        }
+      }
+    }
+    row++
+
+    // Sub-banner: company name (top-right) + seal labels (役職名) underneath
+    if (config?.companyName || seals > 0) {
+      const subRow = ws.getRow(row)
+      subRow.height = 18
+
+      if (config?.companyName) {
+        // Place on the left side, opposite of seals
+        const nameCol = 1
+        const nameEndCol = Math.max(2, totalCols - seals * 2)
+        if (nameEndCol > nameCol) ws.mergeCells(row, nameCol, row, nameEndCol)
+        const c = subRow.getCell(nameCol)
+        c.value = config.companyName
+        c.font = { size: 10, color: { argb: 'FF555555' } }
+        c.alignment = { horizontal: 'left', vertical: 'middle' }
+      }
+
+      if (seals > 0) {
+        // Seal labels — default to common Japanese approval titles
+        const defaultLabels = ['担当', '課長', '部長', '事業部長', '社長']
+        const sealStartCol = totalCols - seals * 2 + 1
+        for (let s = 0; s < seals; s++) {
+          const col = sealStartCol + s * 2
+          const c = subRow.getCell(col)
+          c.value = defaultLabels[s] ?? `承認${s + 1}`
+          c.font = { size: 8, color: { argb: 'FF555555' } }
+          c.alignment = { horizontal: 'center', vertical: 'middle' }
+        }
+      }
+      row++
+    }
+
+    row++ // blank separator after banner
+  }
+
+  /* ── Meta block (申請番号 / 申請者 / 申請部署 / 申請日 ...) ─────── */
+  if (config?.metaBlock?.length) {
+    const metaRow = ws.getRow(row)
+    metaRow.height = 22
+    let col = 1
+    for (const mf of config.metaBlock) {
+      const labelCell = metaRow.getCell(col)
+      labelCell.value = mf.label
+      labelCell.font = { bold: true, size: 10 }
+      labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.labelBg } }
+      labelCell.border = ALL_BORDERS
+      labelCell.alignment = { horizontal: 'center', vertical: 'middle' }
+
+      const valCell = metaRow.getCell(col + 1)
+      valCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.inputBg } }
+      valCell.border = ALL_BORDERS
+      valCell.alignment = { vertical: 'middle' }
+
+      col += 2
+    }
+    row++
+    row++ // separator
+  }
+
+  /* ── Vendor block (取引先 / 担当者 / 住所 / 電話) ──────────────── */
+  if (config?.vendorBlock) {
+    const vendorFields = ['取引先名', '担当者', '住所', '電話番号']
+    for (const label of vendorFields) {
+      const vRow = ws.getRow(row)
+      vRow.height = 22
+
+      const labelCell = vRow.getCell(1)
+      labelCell.value = label
+      labelCell.font = { bold: true, size: 10 }
+      labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.labelBg } }
+      labelCell.border = ALL_BORDERS
+      labelCell.alignment = { horizontal: 'center', vertical: 'middle' }
+
+      // Merge value across remaining columns
+      if (totalCols > 1) ws.mergeCells(row, 2, row, totalCols)
+      const valCell = vRow.getCell(2)
+      valCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.inputBg } }
+      valCell.border = ALL_BORDERS
+      valCell.alignment = { vertical: 'middle' }
+
+      row++
+    }
+    row++ // separator
+  }
+
   /* ── Header fields (職出し日 / 納期) ────────────────────────────── */
   if (config?.headerFields?.length) {
     const hRow = ws.getRow(row)

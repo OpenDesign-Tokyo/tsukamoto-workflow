@@ -12,6 +12,7 @@ export const FIELD_TYPE_LABELS: Record<FormField['type'], string> = {
   table: 'テーブル',
   formula: '計算式',
   file: 'ファイル',
+  vendor_select: '取引先',
 }
 
 export const FIELD_TYPES = Object.keys(FIELD_TYPE_LABELS) as FormField['type'][]
@@ -27,6 +28,7 @@ export const FIELD_TYPE_COLORS: Record<FormField['type'], string> = {
   table: 'bg-indigo-100 text-indigo-700',
   formula: 'bg-cyan-100 text-cyan-700',
   file: 'bg-rose-100 text-rose-700',
+  vendor_select: 'bg-emerald-100 text-emerald-700',
 }
 
 // Zod validation schemas

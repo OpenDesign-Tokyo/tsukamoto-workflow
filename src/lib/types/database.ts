@@ -82,9 +82,36 @@ export interface FormSchema {
   }
 }
 
+export interface Vendor {
+  id: string
+  code: string
+  name: string
+  name_kana?: string | null
+  short_name?: string | null
+  address?: string | null
+  contact_person?: string | null
+  contact_email?: string | null
+  contact_phone?: string | null
+  payment_terms?: string | null
+  credit_limit?: number | null
+  category?: string | null
+  notes?: string | null
+  is_active: boolean
+}
+
+/** Vendor attribute keys that a `vendor_select` field can auto-fill into other form fields. */
+export type VendorAttrKey =
+  | 'code' | 'name' | 'name_kana' | 'short_name'
+  | 'address' | 'contact_person' | 'contact_email' | 'contact_phone'
+  | 'payment_terms' | 'category'
+
 export interface FormField {
   id: string
-  type: 'text' | 'number' | 'date' | 'select' | 'textarea' | 'currency' | 'table' | 'formula' | 'file'
+  type: 'text' | 'number' | 'date' | 'select' | 'textarea' | 'currency' | 'table' | 'formula' | 'file' | 'vendor_select'
+  /** For `vendor_select`: when a vendor is picked, populate these other form fields from the vendor record. */
+  vendorAutoFill?: { fieldId: string; vendorKey: VendorAttrKey }[]
+  /** For `vendor_select`: restrict to specific categories (仕入先 / 外注先 等). */
+  vendorCategories?: string[]
   label: string
   required?: boolean
   placeholder?: string
@@ -103,6 +130,19 @@ export interface FormField {
     footerFields?: { label: string }[]
     dataRows?: number
     taxNote?: string
+    // ── Phase 1.1: business-form aesthetics (X-point Cloud parity) ────
+    /** Large centered document title, e.g. "注文書". When set, rendered as a banner row above the table. */
+    documentTitle?: string
+    /** Company name shown top-right, e.g. "ツカモトコーポレーション". */
+    companyName?: string
+    /** Reserve a cell for a company logo image (placeholder text only — image embedding handled separately). */
+    companyLogoPlaceholder?: boolean
+    /** Applicant metadata block: rendered as label/value pairs at the top, e.g. [{ label: "申請番号" }, { label: "申請者" }, { label: "申請部署" }]. */
+    metaBlock?: { label: string }[]
+    /** Vendor / counterparty info block. When true, renders a 4-row 取引先 box (社名 / 担当者 / 住所 / 電話). */
+    vendorBlock?: boolean
+    /** Number of approval seal (印鑑) boxes to render — typically 3 for 課長 / 部長 / 事業部長. */
+    approvalSeals?: number
   }
 }
 

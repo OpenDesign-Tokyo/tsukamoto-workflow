@@ -12,6 +12,8 @@ export interface TeamsMessage {
   documentTypeName?: string
   currentStep?: number
   totalSteps?: number
+  /** Phase 1.2: when set on an approval_request card, renders inline 承認/差戻し buttons. */
+  approverActions?: { applicationId: string; approverId: string }
 }
 
 export async function sendTeamsNotification(
@@ -34,6 +36,7 @@ export async function sendTeamsNotification(
       documentTypeName: message.documentTypeName,
       currentStep: message.currentStep,
       totalSteps: message.totalSteps,
+      approverActions: message.approverActions,
     })
 
     // Power Automate DM flow: recipientEmail + card

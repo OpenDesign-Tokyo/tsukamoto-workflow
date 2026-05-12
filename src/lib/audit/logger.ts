@@ -17,6 +17,10 @@ export type AuditAction =
   | 'proxy.update'
   | 'proxy.delete'
   | 'graph_sync.execute'
+  | 'vendor.create'
+  | 'vendor.update'
+  | 'vendor.delete'
+  | 'vendor.import'
 
 interface AuditLogEntry {
   actorId: string
