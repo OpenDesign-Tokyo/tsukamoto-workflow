@@ -392,54 +392,76 @@ export default function NewApplicationFormPage() {
         <Button
           variant="outline"
           onClick={() => handleSubmit(true)}
-          disabled={isSubmitting}
+          disabled={isSubmitting || isLoadingPreview}
         >
-          <Save className="w-4 h-4 mr-2" />
-          下書き保存
+          {isSubmitting ? (
+            <><Loader2 className="w-4 h-4 mr-2 animate-spin" />保存中...</>
+          ) : (
+            <><Save className="w-4 h-4 mr-2" />下書き保存</>
+          )}
         </Button>
         <Button
           onClick={handlePrepareSubmit}
-          disabled={isSubmitting}
+          disabled={isSubmitting || isLoadingPreview}
           className="bg-[#2563eb] hover:bg-[#1d4ed8]"
         >
-          <Send className="w-4 h-4 mr-2" />
-          申請する
+          {isLoadingPreview ? (
+            <><Loader2 className="w-4 h-4 mr-2 animate-spin" />承認ルート確認中...</>
+          ) : (
+            <><Send className="w-4 h-4 mr-2" />申請する</>
+          )}
         </Button>
       </div>
 
-      <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+      <AlertDialog
+        open={showConfirm}
+        onOpenChange={(open) => { if (!isSubmitting) setShowConfirm(open) }}
+      >
         <AlertDialogContent className="max-w-xl">
           <AlertDialogHeader>
-            <AlertDialogTitle>申請の確認</AlertDialogTitle>
+            <AlertDialogTitle>{isSubmitting ? '申請を送信しています' : '申請の確認'}</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="space-y-5">
-                <p>「{docType.name}」を申請します。</p>
-
-                {isLoadingPreview ? (
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    承認ルートを確認中...
+              {isSubmitting ? (
+                <div className="flex flex-col items-center justify-center gap-4 py-10">
+                  <div className="relative">
+                    <div className="w-14 h-14 rounded-full border-4 border-blue-100 border-t-blue-600 animate-spin" />
                   </div>
-                ) : routePreview && (
-                  <ConfirmRoutePreview
-                    routePreview={routePreview}
-                    selectedApprovers={selectedApprovers}
-                    setSelectedApprovers={setSelectedApprovers}
-                  />
-                )}
-              </div>
+                  <div className="text-center space-y-1">
+                    <p className="text-sm font-semibold text-gray-900">申請を送信中...</p>
+                    <p className="text-xs text-gray-500">そのままお待ちください（5〜10秒程度）</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-5">
+                  <p>「{docType.name}」を申請します。</p>
+
+                  {isLoadingPreview ? (
+                    <div className="flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      承認ルートを確認中...
+                    </div>
+                  ) : routePreview && (
+                    <ConfirmRoutePreview
+                      routePreview={routePreview}
+                      selectedApprovers={selectedApprovers}
+                      setSelectedApprovers={setSelectedApprovers}
+                    />
+                  )}
+                </div>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>キャンセル</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => handleSubmit(false)}
-              disabled={isSubmitting || isLoadingPreview}
-            >
-              {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              申請する
-            </AlertDialogAction>
-          </AlertDialogFooter>
+          {!isSubmitting && (
+            <AlertDialogFooter>
+              <AlertDialogCancel>キャンセル</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => handleSubmit(false)}
+                disabled={isSubmitting || isLoadingPreview}
+              >
+                申請する
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          )}
         </AlertDialogContent>
       </AlertDialog>
     </div>
