@@ -2,7 +2,9 @@
 
 > **対象**: Phase 1.2「Teams 承認完結」
 > **エンドポイント**: `POST /api/teams/action`
-> **依存環境変数**: `TEAMS_ACTION_SECRET`（Vercel）、`TEAMS_WEBHOOK_URL`（Vercel）
+> **依存環境変数**: `TEAMS_ACTION_SECRET`（Vercel）、`TEAMS_WEBHOOK_URL`（Vercel）、`TEAMS_INLINE_APPROVAL_ENABLED=true`（Vercel）
+>
+> **デフォルト動作**: `TEAMS_INLINE_APPROVAL_ENABLED` 未設定時は Teams カードに承認/差戻しボタンが**出ない**（「詳細を見る」リンクのみの web 遷移）。Power Automate を設定する段階になったらこの環境変数を `true` にする。
 
 ---
 

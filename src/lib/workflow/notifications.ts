@@ -38,8 +38,14 @@ export async function sendWorkflowNotification(params: NotificationParams) {
     .maybeSingle()
 
   if (recipient) {
-    // For approval requests, embed inline 承認 / 差戻し buttons so the approver can act from Teams.
-    const approverActions = params.type === 'approval_request'
+    // For approval requests, embed inline 承認 / 差戻し buttons so the approver
+    // can act from Teams. Gated behind TEAMS_INLINE_APPROVAL_ENABLED to avoid
+    // showing buttons that won't work until Power Automate + TEAMS_ACTION_SECRET
+    // are configured (see docs/POWER_AUTOMATE_TEAMS_ACTION.md). Default = off,
+    // so承認 falls back to the "詳細を見る" web link.
+    const inlineApproval = process.env.TEAMS_INLINE_APPROVAL_ENABLED === 'true'
+                        || process.env.TEAMS_INLINE_APPROVAL_ENABLED === '1'
+    const approverActions = params.type === 'approval_request' && inlineApproval
       ? { applicationId: params.applicationId, approverId: params.recipientId }
       : undefined
 

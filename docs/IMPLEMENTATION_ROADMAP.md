@@ -73,7 +73,8 @@ PoC稼働と並行して、本番化に耐える品質に引き上げる。
 - [x] `/api/teams/action` を新設: Power Automate からの action callback を受け、`approveApplication` / `rejectApplication` を実行（Bearer トークン認証）
 - [x] Adaptive Card に差戻しコメント入力用の `Input.Text` を追加（required）
 - [x] Power Automate フロー設計ドキュメント: `docs/POWER_AUTOMATE_TEAMS_ACTION.md`
-- [ ] 本番テナントで Power Automate フロー作成、`TEAMS_ACTION_SECRET` 設定、E2E 動作確認
+- [x] `TEAMS_INLINE_APPROVAL_ENABLED` 環境変数で機能ゲート（デフォルト OFF = web 遷移）
+- [ ] 本番テナントで Power Automate フロー作成、`TEAMS_ACTION_SECRET` + `TEAMS_INLINE_APPROVAL_ENABLED=true` 設定、E2E 動作確認
 
 ### 1.3 取引先マスタ連動（商社業務の入力負荷激減）
 - [x] 新規テーブル: `vendors`（仕入先マスタ） - `supabase/migrations/20260513000002_vendors.sql`
