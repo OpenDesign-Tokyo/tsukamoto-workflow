@@ -97,6 +97,14 @@ PoC稼働と並行して、本番化に耐える品質に引き上げる。
 
 ---
 
+### 1.4 SharePoint 自動アーカイブ ✅ 実装済み
+- [x] 承認完了時に PDF を SharePoint へ自動保存（fire-and-forget）
+- [x] 書類種別ごとのフォルダにルーティング (`document_types.name` と完全一致)
+- [x] メタデータ列（申請番号 / 申請者 / 最終承認者 / 承認者一覧 / 申請日 / 承認完了日 / 書類種別）を listItem fields にセット
+- [x] サーバーサイド PDF 生成 (`exportPdfServer.ts`, jsPDF + NotoSansJP)
+- [x] 設定手順: [docs/SHAREPOINT_ARCHIVE_SETUP.md](SHAREPOINT_ARCHIVE_SETUP.md)
+- [ ] 本番 Azure AD 権限 (`Sites.ReadWrite.All`) 付与 + SharePoint カラム設定 + 環境変数登録
+
 ## Phase 2 — 経理連携・拡張（PoC評価後）
 
 ### 2.1 AI-OCR で請求書 → T14 仕入計上を自動下書き

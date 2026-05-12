@@ -26,6 +26,14 @@ export function isGraphConfigured(): boolean {
   return getGraphConfig() !== null
 }
 
+/**
+ * Public accessor exposed for other Graph modules (sharepoint.ts) so they
+ * don't each duplicate token-cache logic.
+ */
+export async function getAccessTokenForGraph(): Promise<string> {
+  return getAccessToken()
+}
+
 async function getAccessToken(): Promise<string> {
   // Return cached token if still valid (with 5 min buffer)
   if (tokenCache && tokenCache.expiresAt > Date.now() + 5 * 60 * 1000) {

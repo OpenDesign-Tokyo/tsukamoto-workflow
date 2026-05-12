@@ -1,6 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolveApprover, resolveApprovers } from './resolver'
 import { sendWorkflowNotification } from './notifications'
+import { archiveApprovedApplication } from './archive'
 import { writeAuditLog } from '@/lib/audit/logger'
 import type { WorkflowSubmitResult, WorkflowApproveResult, WorkflowRejectResult, ResolvedApprover } from '@/lib/types/workflow'
 import type { ApprovalRouteStep } from '@/lib/types/database'
@@ -130,6 +131,12 @@ async function finalApprove(
     documentTypeName,
     currentStep: totalSteps,
     totalSteps,
+  })
+
+  // SharePoint 自動アーカイブを fire-and-forget で起動する。
+  // 失敗してもエンジン側のレスポンスは妨げない（archive.ts 内で完結）。
+  archiveApprovedApplication(applicationId).catch(err => {
+    console.error(`[engine.finalApprove] archive failed for ${applicationId}:`, err)
   })
 }
 
