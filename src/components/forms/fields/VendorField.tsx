@@ -14,6 +14,7 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
+import { getDemoUserHeader } from '@/lib/auth/demo-auth'
 import type { FormField, Vendor } from '@/lib/types/database'
 
 interface Props {
@@ -26,13 +27,21 @@ interface Props {
 let vendorCachePromise: Promise<Vendor[]> | null = null
 
 async function loadVendors(): Promise<Vendor[]> {
-  if (!vendorCachePromise) {
-    vendorCachePromise = fetch('/api/vendors')
-      .then(r => r.ok ? r.json() : { vendors: [] })
-      .then((data: { vendors: Vendor[] }) => data.vendors ?? [])
-      .catch(() => [])
-  }
-  return vendorCachePromise
+  if (vendorCachePromise) return vendorCachePromise
+
+  // Cache the in-flight promise so concurrent VendorFields share one fetch,
+  // but don't cache failures — a 401 from missing auth headers shouldn't
+  // permanently empty the list for the rest of the session.
+  const promise = fetch('/api/vendors', { headers: getDemoUserHeader() })
+    .then(async r => {
+      if (!r.ok) { vendorCachePromise = null; return [] as Vendor[] }
+      const data = (await r.json()) as { vendors: Vendor[] }
+      return data.vendors ?? []
+    })
+    .catch(() => { vendorCachePromise = null; return [] as Vendor[] })
+
+  vendorCachePromise = promise
+  return promise
 }
 
 export function VendorField({ field, value, onSelect, readOnly }: Props) {
@@ -96,7 +105,10 @@ export function VendorField({ field, value, onSelect, readOnly }: Props) {
             </span>
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <PopoverContent
+          className="w-(--radix-popover-trigger-width) min-w-[320px] p-0"
+          align="start"
+        >
           <Command
             filter={(itemValue, search) => {
               // itemValue is composed below; match against the full label
