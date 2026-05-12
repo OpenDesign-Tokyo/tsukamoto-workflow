@@ -70,7 +70,7 @@ const STEP_COLORS = [
   { bg: 'bg-emerald-500', light: 'bg-emerald-50', text: 'text-emerald-700', ring: 'ring-emerald-200' },
 ] as const
 
-type StepState = 'completed' | 'current' | 'future' | 'rejected' | 'skipped' | 'dynamic_pending'
+type StepState = 'editor' | 'completed' | 'current' | 'future' | 'rejected' | 'skipped' | 'dynamic_pending'
 
 /** Decide overall display state for a step. */
 function computeStepState(
@@ -79,6 +79,12 @@ function computeStepState(
   applicationStatus: Props['applicationStatus'],
 ): StepState {
   const approvers = step.approvers || []
+
+  // Editor mode: no currentStep AND no executed approvers → render with the
+  // colorful per-index palette (matches the original /admin/routes look).
+  if (currentStep === undefined && approvers.length === 0) {
+    return 'editor'
+  }
 
   if (approvers.some(a => a.action === 'rejected')) return 'rejected'
 
@@ -119,7 +125,7 @@ function StepBubble({
   const color = STEP_COLORS[idx % STEP_COLORS.length]
   const sizeCfg = size === 'compact'
     ? { box: 'px-2.5 py-1.5', circle: 'w-6 h-6 text-[10px]', main: 'text-[11px]', sub: 'text-[9px]', gap: 'gap-1.5' }
-    : { box: 'px-4 py-2.5',   circle: 'w-7 h-7 text-xs',    main: 'text-xs',    sub: 'text-[10px]', gap: 'gap-2.5' }
+    : { box: 'px-4 py-2',     circle: 'w-7 h-7 text-xs',    main: 'text-xs',    sub: 'text-[10px]', gap: 'gap-2.5' }
 
   // ── State-driven visuals ────────────────────────────────────────────────
   let circleClass: string
@@ -130,6 +136,13 @@ function StepBubble({
   let nameClass: string = color.text
 
   switch (state) {
+    case 'editor':
+      // Per-step rainbow palette — matches the original /admin/routes look
+      // before this visualizer existed.
+      circleClass = cn(color.bg, 'shadow-sm')
+      boxClass = cn(color.light, 'border-transparent')
+      nameClass = color.text
+      break
     case 'completed':
       circleClass = 'bg-emerald-500'
       boxClass = 'bg-emerald-50 border-emerald-200'
@@ -234,9 +247,12 @@ export function ApprovalFlowVisualizer({
     return <p className="text-xs text-gray-400">承認ステップが設定されていません</p>
   }
 
+  // Reserve top space only when the "▼いまここ" marker may render
+  const hasCurrent = currentStep !== undefined && currentStep > 0
+
   return (
-    <div className={cn('space-y-3', className)}>
-      <div className="flex items-center gap-1 overflow-x-auto pt-5 pb-1">
+    <div className={cn('space-y-2', className)}>
+      <div className={cn('flex items-center gap-1 overflow-x-auto pb-0.5', hasCurrent && 'pt-5')}>
         {steps.map((step, idx) => {
           const state = computeStepState(step, currentStep, applicationStatus)
           const isLast = idx === steps.length - 1
