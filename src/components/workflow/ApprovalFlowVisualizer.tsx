@@ -85,9 +85,11 @@ function computeStepState(
 ): StepState {
   const approvers = step.approvers || []
 
-  // Editor mode: no currentStep AND no executed approvers → render with the
-  // colorful per-index palette (matches the original /admin/routes look).
-  if (currentStep === undefined && approvers.length === 0) {
+  // Editor / preview mode: no currentStep, and no one has acted yet (all
+  // pending or empty). Renders with the colorful per-index palette.
+  //   - admin/routes:  approvers=[]
+  //   - 申請確認モーダル: approvers=[候補者] but all action='pending'
+  if (currentStep === undefined && approvers.every(a => a.action === 'pending')) {
     return 'editor'
   }
 
@@ -191,8 +193,14 @@ function StepBubble({
   if (approvers.length === 1) {
     detailText = approvers[0].name
   } else if (approvers.length > 1) {
-    const pending = approvers.filter(a => a.action === 'pending').length
-    detailText = `${approvers.length}名` + (pending > 0 ? ` (${pending}名承認待ち)` : '')
+    const allPending = approvers.every(a => a.action === 'pending')
+    if (allPending) {
+      // Preview mode: just count candidates
+      detailText = `${approvers.length}名候補`
+    } else {
+      const pending = approvers.filter(a => a.action === 'pending').length
+      detailText = `${approvers.length}名` + (pending > 0 ? ` (${pending}名承認待ち)` : '')
+    }
   } else if (step.positionName) {
     detailText = step.positionName
   }

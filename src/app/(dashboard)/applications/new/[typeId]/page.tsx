@@ -8,7 +8,6 @@ import { getDemoUserHeader } from '@/lib/auth/demo-auth'
 import { FormRenderer } from '@/components/forms/FormRenderer'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +25,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Save, Send, ArrowLeft, Loader2, Users, User, ChevronRight } from 'lucide-react'
+import { Save, Send, ArrowLeft, Loader2 } from 'lucide-react'
+import { Label } from '@/components/ui/label'
+import { ApprovalFlowVisualizer, type FlowStepData } from '@/components/workflow/ApprovalFlowVisualizer'
 import { toast } from 'sonner'
 import type { DocumentType, FormTemplate, FormSchema } from '@/lib/types/database'
 import { format } from 'date-fns'
@@ -43,6 +44,97 @@ interface RoutePreviewStep {
     positionName: string
     departmentName: string
   }[]
+}
+
+/**
+ * 申請の確認モーダル内のルート可視化セクション。
+ *
+ * 設計:
+ *   - ApprovalFlowVisualizer で水平ステップを表示（admin/routes と同じ見た目）
+ *   - 単独承認(single)で複数候補があるステップは「承認者の選択」を別セクションに分離
+ *   - 単一の候補者しかいないステップは選択不要なので表示しない
+ *   - 「承認ルート」「承認者の選択」のラベルはカード外側に出して規則性を整える
+ */
+function ConfirmRoutePreview({
+  routePreview,
+  selectedApprovers,
+  setSelectedApprovers,
+}: {
+  routePreview: RoutePreviewStep[]
+  selectedApprovers: Record<string, string[]>
+  setSelectedApprovers: React.Dispatch<React.SetStateAction<Record<string, string[]>>>
+}) {
+  // 各ステップを Visualizer 用に変換
+  const flowSteps: FlowStepData[] = routePreview.map(step => {
+    let approvers: FlowStepData['approvers']
+    if (step.candidates.length === 0) {
+      approvers = []
+    } else if (step.approval_type === 'single' && step.candidates.length > 1) {
+      // single + 複数候補: 選択中（未選択時はデフォルトの先頭）を1人だけ表示
+      const selectedId = selectedApprovers[String(step.step_order)]?.[0] || step.candidates[0].employeeId
+      const picked = step.candidates.find(c => c.employeeId === selectedId) || step.candidates[0]
+      approvers = [{ name: picked.employeeName, action: 'pending' }]
+    } else {
+      approvers = step.candidates.map(c => ({ name: c.employeeName, action: 'pending' }))
+    }
+    return {
+      stepOrder: step.step_order,
+      name: step.name,
+      approvalType: step.approval_type as FlowStepData['approvalType'],
+      allowDynamicSelection: step.allow_dynamic_selection,
+      approvers,
+    }
+  })
+
+  // 「単独承認 + 候補が複数 = 申請者が1人指名する必要あり」のステップだけ抽出
+  const selectableSteps = routePreview.filter(
+    s => s.approval_type === 'single' && s.candidates.length > 1,
+  )
+
+  return (
+    <div className="space-y-5">
+      <section className="space-y-2">
+        <Label className="text-xs text-gray-500">承認ルート</Label>
+        <div className="rounded-lg border bg-gray-50/40 p-3">
+          <ApprovalFlowVisualizer steps={flowSteps} />
+        </div>
+      </section>
+
+      {selectableSteps.length > 0 && (
+        <section className="space-y-2">
+          <Label className="text-xs text-gray-500">承認者の選択</Label>
+          <div className="rounded-lg border bg-amber-50/30 divide-y">
+            {selectableSteps.map(step => (
+              <div key={step.step_order} className="px-3 py-2.5 flex items-center justify-between gap-3">
+                <div className="text-sm flex items-center gap-2 min-w-0">
+                  <span className="text-xs text-gray-400 shrink-0">{step.step_order}.</span>
+                  <span className="font-medium truncate">{step.name}</span>
+                </div>
+                <Select
+                  value={selectedApprovers[String(step.step_order)]?.[0] || step.candidates[0].employeeId}
+                  onValueChange={v => setSelectedApprovers(prev => ({
+                    ...prev,
+                    [String(step.step_order)]: [v],
+                  }))}
+                >
+                  <SelectTrigger className="h-8 text-xs w-60 shrink-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {step.candidates.map(c => (
+                      <SelectItem key={c.employeeId} value={c.employeeId}>
+                        {c.employeeName}（{c.positionName}）
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
 }
 
 export default function NewApplicationFormPage() {
@@ -257,11 +349,6 @@ export default function NewApplicationFormPage() {
 
   const schema = template.schema as unknown as FormSchema
 
-  // Check if any step needs selection (single with multiple candidates)
-  const needsSelection = routePreview?.some(
-    s => s.approval_type === 'single' && s.candidates.length > 1
-  )
-
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
@@ -321,80 +408,24 @@ export default function NewApplicationFormPage() {
       </div>
 
       <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
-        <AlertDialogContent className="max-w-lg">
+        <AlertDialogContent className="max-w-xl">
           <AlertDialogHeader>
             <AlertDialogTitle>申請の確認</AlertDialogTitle>
             <AlertDialogDescription asChild>
-              <div className="space-y-3">
+              <div className="space-y-5">
                 <p>「{docType.name}」を申請します。</p>
+
                 {isLoadingPreview ? (
                   <div className="flex items-center gap-2 text-sm text-gray-500">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     承認ルートを確認中...
                   </div>
                 ) : routePreview && (
-                  <Card>
-                    <CardHeader className="pb-2 pt-3 px-3">
-                      <CardTitle className="text-xs font-medium text-gray-500">承認ルート</CardTitle>
-                    </CardHeader>
-                    <CardContent className="px-3 pb-3 space-y-2">
-                      {routePreview.map((step, idx) => (
-                        <div key={step.step_order}>
-                          <div className="flex items-center gap-2">
-                            <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
-                              <span className="text-white text-[9px] font-bold">{step.step_order}</span>
-                            </div>
-                            <span className="text-sm font-medium">{step.name}</span>
-                            {step.approval_type === 'any' && (
-                              <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">OR</span>
-                            )}
-                            {step.approval_type === 'all' && (
-                              <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">AND</span>
-                            )}
-                          </div>
-                          {step.candidates.length === 0 ? (
-                            <p className="text-xs text-gray-400 ml-7">承認者なし（スキップ）</p>
-                          ) : step.approval_type === 'single' && step.candidates.length > 1 ? (
-                            <div className="ml-7 mt-1">
-                              <Select
-                                value={selectedApprovers[String(step.step_order)]?.[0] || step.candidates[0].employeeId}
-                                onValueChange={v => setSelectedApprovers(prev => ({
-                                  ...prev,
-                                  [String(step.step_order)]: [v],
-                                }))}
-                              >
-                                <SelectTrigger className="h-7 text-xs w-56">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {step.candidates.map(c => (
-                                    <SelectItem key={c.employeeId} value={c.employeeId}>
-                                      {c.employeeName}（{c.positionName}）
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ) : (
-                            <div className="ml-7 space-y-0.5">
-                              {step.candidates.map(c => (
-                                <div key={c.employeeId} className="flex items-center gap-1.5 text-xs text-gray-600">
-                                  <User className="w-3 h-3 text-gray-400" />
-                                  {c.employeeName}
-                                  <span className="text-gray-400">（{c.positionName}）</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {idx < routePreview.length - 1 && (
-                            <div className="flex justify-center my-1">
-                              <ChevronRight className="w-3 h-3 text-gray-300 rotate-90" />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </CardContent>
-                  </Card>
+                  <ConfirmRoutePreview
+                    routePreview={routePreview}
+                    selectedApprovers={selectedApprovers}
+                    setSelectedApprovers={setSelectedApprovers}
+                  />
                 )}
               </div>
             </AlertDialogDescription>
