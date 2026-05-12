@@ -62,12 +62,17 @@ interface Props {
   className?: string
 }
 
+// 隣接ステップが色相環で離れるよう、青系→暖色→緑→紫→ピンク→シアン→橙
+// の順で並べてある。7ステップを超えた場合は modulo でループするが、
+// adjacent pair が同じ色になることはない。
 const STEP_COLORS = [
-  { bg: 'bg-blue-500',    light: 'bg-blue-50',    text: 'text-blue-700',    ring: 'ring-blue-200' },
-  { bg: 'bg-indigo-500',  light: 'bg-indigo-50',  text: 'text-indigo-700',  ring: 'ring-indigo-200' },
-  { bg: 'bg-violet-500',  light: 'bg-violet-50',  text: 'text-violet-700',  ring: 'ring-violet-200' },
-  { bg: 'bg-purple-500',  light: 'bg-purple-50',  text: 'text-purple-700',  ring: 'ring-purple-200' },
-  { bg: 'bg-emerald-500', light: 'bg-emerald-50', text: 'text-emerald-700', ring: 'ring-emerald-200' },
+  { bg: 'bg-sky-500',     light: 'bg-sky-50',     text: 'text-sky-700',     ring: 'ring-sky-200' },     // 1: 空色
+  { bg: 'bg-amber-500',   light: 'bg-amber-50',   text: 'text-amber-700',   ring: 'ring-amber-200' },   // 2: 琥珀
+  { bg: 'bg-emerald-500', light: 'bg-emerald-50', text: 'text-emerald-700', ring: 'ring-emerald-200' }, // 3: 翠
+  { bg: 'bg-violet-500',  light: 'bg-violet-50',  text: 'text-violet-700',  ring: 'ring-violet-200' },  // 4: 菫
+  { bg: 'bg-rose-500',    light: 'bg-rose-50',    text: 'text-rose-700',    ring: 'ring-rose-200' },    // 5: 薔薇
+  { bg: 'bg-cyan-500',    light: 'bg-cyan-50',    text: 'text-cyan-700',    ring: 'ring-cyan-200' },    // 6: 青緑
+  { bg: 'bg-orange-500',  light: 'bg-orange-50',  text: 'text-orange-700',  ring: 'ring-orange-200' },  // 7: 橙
 ] as const
 
 type StepState = 'editor' | 'completed' | 'current' | 'future' | 'rejected' | 'skipped' | 'dynamic_pending'
