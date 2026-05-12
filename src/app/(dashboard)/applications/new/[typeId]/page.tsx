@@ -408,7 +408,7 @@ export default function NewApplicationFormPage() {
           {isLoadingPreview ? (
             <><Loader2 className="w-4 h-4 mr-2 animate-spin" />承認ルート確認中...</>
           ) : (
-            <><Send className="w-4 h-4 mr-2" />申請する</>
+            <><Send className="w-4 h-4 mr-2" />申請内容を確認</>
           )}
         </Button>
       </div>
