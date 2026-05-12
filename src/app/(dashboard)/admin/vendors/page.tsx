@@ -15,7 +15,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Trash2, Pencil, Search, FileUp, Building2 } from 'lucide-react'
+import { Plus, Trash2, Pencil, Search, FileUp, Building2, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Vendor } from '@/lib/types/database'
 
@@ -39,8 +39,6 @@ type FormState = typeof EMPTY_FORM
 
 const CATEGORY_OPTIONS = ['仕入先', '外注先', 'その他']
 
-const CSV_TEMPLATE_HEADER = 'code,name,name_kana,short_name,address,contact_person,contact_email,contact_phone,payment_terms,credit_limit,category,is_active'
-
 export default function VendorsAdminPage() {
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -52,8 +50,9 @@ export default function VendorsAdminPage() {
   const [showInactive, setShowInactive] = useState(false)
   const [form, setForm] = useState<FormState>(EMPTY_FORM)
   const [showImport, setShowImport] = useState(false)
-  const [csvText, setCsvText] = useState('')
+  const [importFile, setImportFile] = useState<File | null>(null)
   const [isImporting, setIsImporting] = useState(false)
+  const [isDownloadingTemplate, setIsDownloadingTemplate] = useState(false)
 
   const fetchVendors = useCallback(async () => {
     const res = await fetch(`/api/admin/vendors?include_inactive=1`, { headers: getDemoUserHeader() })
@@ -150,35 +149,59 @@ export default function VendorsAdminPage() {
   }
 
   const handleImport = async () => {
-    if (!csvText.trim()) { toast.error('CSVを貼り付けてください'); return }
+    if (!importFile) { toast.error('xlsxファイルを選択してください'); return }
     setIsImporting(true)
     try {
+      const arrayBuffer = await importFile.arrayBuffer()
+      // Convert to base64 in chunks to avoid stack overflow on large files
+      const bytes = new Uint8Array(arrayBuffer)
+      let binary = ''
+      const chunkSize = 0x8000
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)))
+      }
+      const base64 = btoa(binary)
+
       const res = await fetch('/api/admin/vendors/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getDemoUserHeader() },
-        body: JSON.stringify({ csv: csvText }),
+        body: JSON.stringify({ fileBase64: base64 }),
       })
       const data = await res.json()
       if (res.ok) {
         toast.success(`インポート完了: ${data.created}件新規 / ${data.updated}件更新`)
         setShowImport(false)
-        setCsvText('')
+        setImportFile(null)
         fetchVendors()
       } else {
         const details = Array.isArray(data.details) ? `\n${data.details.slice(0, 5).join('\n')}` : ''
         toast.error(`${data.error || 'インポートに失敗しました'}${details}`)
       }
+    } catch (e) {
+      toast.error(`ファイルの読み込みに失敗しました: ${(e as Error).message}`)
     } finally {
       setIsImporting(false)
     }
   }
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => setCsvText(String(reader.result ?? ''))
-    reader.readAsText(file, 'utf-8')
+  const handleTemplateDownload = async () => {
+    setIsDownloadingTemplate(true)
+    try {
+      const res = await fetch('/api/admin/vendors/template', { headers: getDemoUserHeader() })
+      if (!res.ok) {
+        toast.error('テンプレートのダウンロードに失敗しました')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = '取引先マスタ_テンプレート.xlsx'
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setIsDownloadingTemplate(false)
+    }
   }
 
   if (isLoading) {
@@ -195,9 +218,13 @@ export default function VendorsAdminPage() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold">取引先マスタ</h1>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={handleTemplateDownload} disabled={isDownloadingTemplate}>
+            <Download className="w-4 h-4 mr-2" />
+            テンプレートDL
+          </Button>
           <Button variant="outline" onClick={() => setShowImport(true)}>
             <FileUp className="w-4 h-4 mr-2" />
-            CSVインポート
+            インポート
           </Button>
           <Button onClick={openAddForm}>
             <Plus className="w-4 h-4 mr-2" />
@@ -348,49 +375,51 @@ export default function VendorsAdminPage() {
 
       <p className="text-xs text-gray-500 text-right">{filtered.length} / {vendors.length} 件</p>
 
-      {/* CSV Import sheet */}
+      {/* xlsx Import sheet */}
       <Sheet open={showImport} onOpenChange={setShowImport}>
-        <SheetContent side="right" className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>CSV インポート</SheetTitle>
+            <SheetTitle>取引先マスタ インポート</SheetTitle>
             <SheetDescription>
-              既存のExcel取引先リストからCSVで一括登録できます。`code` 列が一致する場合は上書き更新されます。
+              テンプレート（.xlsx）に取引先データを記入し、ここからアップロードしてください。
+              「取引先コード」が既存の取引先と一致する場合は上書き更新されます。
             </SheetDescription>
           </SheetHeader>
-          <div className="space-y-4 mt-4 px-2">
-            <div className="text-sm space-y-1">
-              <p className="font-medium">必須列</p>
-              <p className="text-xs text-gray-600">code, name</p>
-              <p className="font-medium mt-2">任意列</p>
-              <p className="text-xs text-gray-600">
-                name_kana, short_name, address, contact_person, contact_email, contact_phone,
-                payment_terms, credit_limit, category, is_active
+          <div className="space-y-5 mt-6 px-2">
+            <div className="rounded-md bg-blue-50 border border-blue-200 p-3 text-sm space-y-2">
+              <p className="font-medium text-blue-900">手順</p>
+              <ol className="text-xs text-blue-900 space-y-1 list-decimal list-inside">
+                <li>右上の「テンプレートDL」から xlsx をダウンロード</li>
+                <li>Excel で「取引先マスタ」シートにデータを記入（サンプル行は削除可）</li>
+                <li>保存して、下の「ファイル選択」からアップロード</li>
+              </ol>
+              <p className="text-xs text-blue-700 mt-2">
+                ※ 必須列は「取引先コード」と「社名」。形式が不正な場合は行ごとにエラーが表示されます。
               </p>
             </div>
+
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>CSV ファイル</Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setCsvText(CSV_TEMPLATE_HEADER + '\nV-9999,テスト取引先,テストトリヒキサキ,テスト,東京都港区,担当太郎,test@example.com,03-0000-0000,月末締め翌月末払い,3000000,仕入先,true')}
-                >
-                  サンプル挿入
-                </Button>
-              </div>
-              <Input type="file" accept=".csv,text/csv" onChange={handleFileUpload} />
-              <Textarea
-                value={csvText}
-                onChange={e => setCsvText(e.target.value)}
-                placeholder={`${CSV_TEMPLATE_HEADER}\nV-0001,株式会社サンプル,...`}
-                rows={12}
-                className="font-mono text-xs"
+              <Label>xlsx ファイル</Label>
+              <Input
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
               />
+              {importFile && (
+                <p className="text-xs text-gray-600">
+                  選択中: <span className="font-medium">{importFile.name}</span>（{Math.round(importFile.size / 1024)} KB）
+                </p>
+              )}
             </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => { setShowImport(false); setCsvText('') }}>キャンセル</Button>
-              <Button onClick={handleImport} disabled={isImporting}>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                variant="outline"
+                onClick={() => { setShowImport(false); setImportFile(null) }}
+              >
+                キャンセル
+              </Button>
+              <Button onClick={handleImport} disabled={isImporting || !importFile}>
                 {isImporting ? 'インポート中...' : 'インポート実行'}
               </Button>
             </div>
