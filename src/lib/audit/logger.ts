@@ -21,6 +21,9 @@ export type AuditAction =
   | 'vendor.update'
   | 'vendor.delete'
   | 'vendor.import'
+  | 'position.create'
+  | 'position.update'
+  | 'position.delete'
 
 interface AuditLogEntry {
   actorId: string

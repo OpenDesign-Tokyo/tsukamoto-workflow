@@ -7,6 +7,7 @@ import { getDemoUserHeader } from '@/lib/auth/demo-auth'
 import { FormRenderer } from '@/components/forms/FormRenderer'
 import { ApprovalTimeline } from '@/components/workflow/ApprovalTimeline'
 import { ApprovalActions } from '@/components/workflow/ApprovalActions'
+import { ApprovalFlowVisualizer, type FlowStepData, type FlowObserver } from '@/components/workflow/ApprovalFlowVisualizer'
 import { StatusBadge } from '@/components/workflow/StatusBadge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -256,6 +257,21 @@ export default function ApplicationDetailPage() {
         </div>
       </div>
 
+      {/* Approval flow visualizer (horizontal, prominent) */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm text-gray-600">承認フロー</CardTitle>
+        </CardHeader>
+        <CardContent className="pb-4">
+          <ApprovalFlowVisualizer
+            steps={buildVisualizerSteps(application)}
+            currentStep={application.current_step}
+            applicationStatus={application.status}
+            observers={buildVisualizerObservers(application)}
+          />
+        </CardContent>
+      </Card>
+
       {/* Meta info */}
       <Card>
         <CardContent className="p-4">
@@ -427,4 +443,97 @@ export default function ApplicationDetailPage() {
       </AlertDialog>
     </div>
   )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers — convert raw API payload into ApprovalFlowVisualizer step / observer
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface RawStep {
+  step_order: number
+  name: string
+  position?: { name: string } | null
+  assignee_type?: string | null
+  approval_type?: string | null
+  allow_dynamic_selection?: boolean | null
+}
+
+interface RawRecord {
+  step_order: number
+  step_name?: string
+  action: 'pending' | 'approved' | 'rejected' | 'skipped'
+  acted_at?: string | null
+  is_proxy?: boolean
+  approver?: { name: string } | null
+  proxy_for?: { name: string } | null
+}
+
+interface RawObserver {
+  id: string
+  notify_on: string
+  employee?: {
+    id: string
+    name: string
+    assignments?: Array<{
+      is_primary?: boolean
+      is_active?: boolean
+      position?: { name: string } | null
+      department?: { name: string } | null
+    }>
+  } | null
+}
+
+function buildVisualizerSteps(application: any): FlowStepData[] {
+  const routeSteps: RawStep[] | undefined = application?.route_template?.steps
+  const records: RawRecord[] = application?.approval_records || []
+
+  // Group records by step_order for execution status display.
+  const byStep = new Map<number, RawRecord[]>()
+  for (const r of records) {
+    const arr = byStep.get(r.step_order) || []
+    arr.push(r)
+    byStep.set(r.step_order, arr)
+  }
+
+  // Prefer the route-template definition (knows all steps including untouched
+  // future ones). Fall back to whatever exists in approval_records.
+  const stepCount = routeSteps?.length || application?.total_steps || byStep.size
+  const result: FlowStepData[] = []
+  for (let i = 1; i <= stepCount; i++) {
+    const def = routeSteps?.find(s => s.step_order === i)
+    const recs = byStep.get(i) || []
+    const name = def?.name || recs[0]?.step_name || `ステップ${i}`
+
+    result.push({
+      stepOrder: i,
+      name,
+      positionName: def?.position?.name ?? null,
+      assigneeType: def?.assignee_type ?? null,
+      allowDynamicSelection: !!def?.allow_dynamic_selection,
+      approvalType: (def?.approval_type as FlowStepData['approvalType']) ?? null,
+      approvers: recs.map(r => ({
+        name: r.approver?.name || '不明',
+        action: r.action,
+        actedAt: r.acted_at ?? null,
+        isProxy: !!r.is_proxy,
+      })),
+    })
+  }
+  return result
+}
+
+function buildVisualizerObservers(application: any): FlowObserver[] {
+  const observers: RawObserver[] | undefined = application?.route_template?.observers
+  if (!observers) return []
+  return observers
+    .filter(o => o.employee)
+    .map(o => {
+      const primary = o.employee!.assignments?.find(a => a.is_primary && a.is_active)
+      return {
+        id: o.id,
+        name: o.employee!.name,
+        positionName: primary?.position?.name ?? null,
+        departmentName: primary?.department?.name ?? null,
+      }
+    })
 }

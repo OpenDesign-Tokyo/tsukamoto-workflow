@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdmin, forbidden } from '@/lib/auth/require-admin'
+import { replaceObservers } from '../route'
 
 export async function PUT(
   req: NextRequest,
@@ -45,6 +46,10 @@ export async function PUT(
 
       await supabase.from('approval_route_steps').insert(steps)
     }
+  }
+
+  if (Array.isArray(body.observers)) {
+    await replaceObservers(supabase, id, body.observers)
   }
 
   return NextResponse.json(data)

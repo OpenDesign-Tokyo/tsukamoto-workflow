@@ -82,6 +82,16 @@ export interface FormSchema {
   }
 }
 
+/** 承認ルートに紐付く閲覧者（オブザーバー）。承認権限なし、通知のみ。 */
+export interface ApprovalRouteObserver {
+  id: string
+  route_template_id: string
+  employee_id: string
+  notify_on: 'submit' | 'each_step' | 'approved' | 'rejected' | 'all'
+  created_at: string
+  employee?: Employee
+}
+
 export interface Vendor {
   id: string
   code: string

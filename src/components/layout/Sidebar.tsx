@@ -16,6 +16,7 @@ import {
   UserCheck,
   Cloud,
   Handshake,
+  Briefcase,
   Menu,
   X,
 } from 'lucide-react'
@@ -33,6 +34,7 @@ const mainNav = [
 const adminNav = [
   { label: '組織図', href: '/admin/org', icon: Building2 },
   { label: 'ユーザー', href: '/admin/users', icon: Users },
+  { label: '役職マスタ', href: '/admin/positions', icon: Briefcase },
   { label: '取引先マスタ', href: '/admin/vendors', icon: Handshake },
   { label: '承認ルート', href: '/admin/routes', icon: Route },
   { label: 'フォーム', href: '/admin/forms', icon: FileSpreadsheet },

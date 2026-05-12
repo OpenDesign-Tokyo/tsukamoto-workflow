@@ -91,6 +91,111 @@ export async function sendWorkflowNotification(params: NotificationParams) {
 
   // CC all admin users (in-app + Teams) so they can monitor all flows
   await notifyAdmins(params)
+
+  // Notify route-level observers ("閲覧者") based on their notify_on setting.
+  // Failures here are intentionally swallowed — observer notifications should
+  // never block the primary workflow.
+  try {
+    await notifyObservers(params)
+  } catch (e) {
+    console.error('[notifications] observer通知失敗:', e)
+  }
+}
+
+/**
+ * 承認ルートに紐付く閲覧者(オブザーバー)に通知を配信する。
+ *
+ * notify_on とイベントのマッピング:
+ *   - approval_request (提出 / ステップ進行) → 'submit' / 'each_step' / 'all'
+ *   - approved (最終承認完了)              → 'approved' / 'all'
+ *   - rejected (差戻し)                    → 'rejected' / 'all'
+ *   - withdrawn (取下げ)                   → 'all'
+ *   - reminder                             → 'all'
+ */
+async function notifyObservers(params: NotificationParams) {
+  const supabase = createAdminClient()
+
+  // ルートテンプレートIDを取得
+  const { data: app } = await supabase
+    .from('applications')
+    .select('route_template_id')
+    .eq('id', params.applicationId)
+    .maybeSingle()
+  if (!app?.route_template_id) return
+
+  const { data: rows } = await supabase
+    .from('approval_route_observers')
+    .select(`
+      employee_id, notify_on,
+      employee:employees(id, name, email, is_active)
+    `)
+    .eq('route_template_id', app.route_template_id)
+  if (!rows?.length) return
+
+  const triggerMap: Record<string, string[]> = {
+    approval_request: ['submit', 'each_step', 'all'],
+    approved: ['approved', 'all'],
+    rejected: ['rejected', 'all'],
+    withdrawn: ['all'],
+    reminder: ['all'],
+  }
+  const matchingTriggers = triggerMap[params.type] || []
+
+  type ObsRow = {
+    employee_id: string
+    notify_on: string
+    employee?: { id: string; name: string; email: string; is_active: boolean } | null
+  }
+
+  const observers = (rows as unknown as ObsRow[]).filter(o =>
+    o.employee &&
+    o.employee.is_active &&
+    matchingTriggers.includes(o.notify_on) &&
+    o.employee_id !== params.recipientId, // 同一人物への二重通知を避ける
+  )
+
+  for (const obs of observers) {
+    if (!obs.employee) continue
+    const title = `[閲覧] ${params.title}`
+
+    // アプリ内通知
+    await supabase.from('notifications').insert({
+      recipient_id: obs.employee_id,
+      application_id: params.applicationId,
+      type: params.type,
+      channel: 'in_app',
+      title,
+      body: params.body,
+      action_url: params.actionUrl,
+      is_read: false,
+    })
+
+    // Teams 通知（観察者には承認ボタンを付けない=approverActions渡さない）
+    const result = await sendTeamsNotification(obs.employee.email, {
+      title,
+      body: params.body,
+      actionUrl: params.actionUrl,
+      type: params.type,
+      applicationNumber: params.applicationNumber,
+      applicantName: params.applicantName,
+      documentTypeName: params.documentTypeName,
+      currentStep: params.currentStep,
+      totalSteps: params.totalSteps,
+    })
+
+    if (result.success && !result.mock) {
+      await supabase.from('notifications').insert({
+        recipient_id: obs.employee_id,
+        application_id: params.applicationId,
+        type: params.type,
+        channel: 'teams',
+        title,
+        body: params.body,
+        action_url: params.actionUrl,
+        is_read: false,
+      })
+    }
+  }
 }
 
 async function notifyAdmins(params: NotificationParams) {

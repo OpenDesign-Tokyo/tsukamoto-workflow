@@ -21,6 +21,23 @@ export async function GET(
       approval_records(
         *,
         approver:employees!approver_id(*)
+      ),
+      route_template:approval_route_templates(
+        id, name,
+        steps:approval_route_steps(
+          step_order, name, assignee_type, approval_type, allow_dynamic_selection,
+          position:positions(id, name)
+        ),
+        observers:approval_route_observers(
+          id, notify_on,
+          employee:employees(id, name,
+            assignments:employee_assignments!employee_id(
+              is_primary, is_active,
+              position:positions(name),
+              department:departments(name)
+            )
+          )
+        )
       )
     `)
     .eq('id', id)
@@ -31,6 +48,10 @@ export async function GET(
   // Sort approval records by step_order
   if (data?.approval_records) {
     data.approval_records.sort((a: { step_order: number }, b: { step_order: number }) => a.step_order - b.step_order)
+  }
+  // Sort route template steps
+  if (data?.route_template?.steps) {
+    (data.route_template.steps as { step_order: number }[]).sort((a, b) => a.step_order - b.step_order)
   }
 
   return NextResponse.json(data)

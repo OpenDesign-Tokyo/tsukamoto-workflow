@@ -28,7 +28,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Pencil, Trash2, X, FileText, CheckCircle2, ChevronRight, Route, GripVertical } from 'lucide-react'
+import { Plus, Pencil, Trash2, X, FileText, Route, GripVertical } from 'lucide-react'
+import { ApprovalFlowVisualizer, type FlowStepData } from '@/components/workflow/ApprovalFlowVisualizer'
 import { toast } from 'sonner'
 import {
   DndContext,
@@ -47,7 +48,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import type { DocumentType, Position } from '@/lib/types/database'
+import type { DocumentType, Position, Employee } from '@/lib/types/database'
 
 interface RouteStep {
   step_order: number
@@ -73,12 +74,20 @@ function nextStepId() {
   return `step-${++stepIdCounter}`
 }
 
+interface RouteObserver {
+  id?: string
+  employee_id: string
+  notify_on: 'submit' | 'each_step' | 'approved' | 'rejected' | 'all'
+  employee?: { id: string; name: string; email?: string }
+}
+
 interface RouteWithSteps {
   id: string
   name: string
   is_default: boolean
   document_type: { id: string; name: string; code: string }
   steps: RouteStep[]
+  observers?: RouteObserver[]
 }
 
 // Step color by index
@@ -181,12 +190,14 @@ function RoutesPageInner() {
   const [routes, setRoutes] = useState<RouteWithSteps[]>([])
   const [docTypes, setDocTypes] = useState<DocumentType[]>([])
   const [positions, setPositions] = useState<Position[]>([])
+  const [employees, setEmployees] = useState<Employee[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
   const [showDialog, setShowDialog] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', document_type_id: '', is_default: false })
   const [steps, setSteps] = useState<EditableStep[]>([])
+  const [observers, setObservers] = useState<RouteObserver[]>([])
   const [deleteTarget, setDeleteTarget] = useState<RouteWithSteps | null>(null)
   const [autoOpenHandled, setAutoOpenHandled] = useState(false)
 
@@ -211,12 +222,14 @@ function RoutesPageInner() {
     if (res.ok) setRoutes(await res.json())
 
     const supabase = createClient()
-    const [dtRes, posRes] = await Promise.all([
+    const [dtRes, posRes, empRes] = await Promise.all([
       supabase.from('document_types').select('*').eq('is_active', true).order('sort_order'),
       supabase.from('positions').select('*').order('rank', { ascending: false }),
+      supabase.from('employees').select('*').eq('is_active', true).order('name'),
     ])
     setDocTypes(dtRes.data || [])
     setPositions(posRes.data || [])
+    setEmployees(empRes.data || [])
     setIsLoading(false)
   }, [])
 
@@ -251,6 +264,7 @@ function RoutesPageInner() {
       { id: nextStepId(), name: '部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false },
       { id: nextStepId(), name: '事業部長承認', assignee_type: 'position_in_parent_department', assignee_position_id: '', approval_type: 'single', allow_dynamic_selection: false },
     ])
+    setObservers([])
     setShowDialog(true)
   }
 
@@ -265,6 +279,12 @@ function RoutesPageInner() {
       approval_type: s.approval_type || 'single',
       allow_dynamic_selection: s.allow_dynamic_selection || false,
     })))
+    setObservers(route.observers?.map(o => ({
+      id: o.id,
+      employee_id: o.employee_id || o.employee?.id || '',
+      notify_on: o.notify_on,
+      employee: o.employee,
+    })) || [])
     setShowDialog(true)
   }
 
@@ -284,6 +304,9 @@ function RoutesPageInner() {
     const body = {
       ...form,
       steps: steps.map((s, i) => ({ name: s.name, assignee_type: s.assignee_type, assignee_position_id: s.assignee_position_id, approval_type: s.approval_type, allow_dynamic_selection: s.allow_dynamic_selection, step_order: i + 1 })),
+      observers: observers
+        .filter(o => o.employee_id)
+        .map(o => ({ employee_id: o.employee_id, notify_on: o.notify_on })),
     }
     const url = editingId ? `/api/admin/routes/${editingId}` : '/api/admin/routes'
     const res = await fetch(url, {
@@ -378,33 +401,16 @@ function RoutesPageInner() {
 
                 {/* Steps flow */}
                 <div className="px-5 py-4">
-                  <div className="flex items-center gap-1 overflow-x-auto">
-                    {route.steps.map((step, idx) => {
-                      const color = STEP_COLORS[idx % STEP_COLORS.length]
-                      return (
-                        <div key={step.step_order} className="flex items-center gap-1 shrink-0">
-                          <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl ${color.light} border border-transparent`}>
-                            {/* Step number circle */}
-                            <div className={`w-7 h-7 rounded-full ${color.bg} flex items-center justify-center shrink-0 shadow-sm`}>
-                              <span className="text-white text-xs font-bold">{step.step_order}</span>
-                            </div>
-                            {/* Step info */}
-                            <div>
-                              <p className={`text-xs font-semibold ${color.text}`}>{step.name}</p>
-                              {step.position && (
-                                <p className="text-[10px] text-gray-400">{step.position.name}</p>
-                              )}
-                            </div>
-                            {/* Check icon */}
-                            <CheckCircle2 className={`w-4 h-4 ${color.text} opacity-30 ml-1`} />
-                          </div>
-                          {idx < route.steps.length - 1 && (
-                            <ChevronRight className="w-4 h-4 text-gray-300 shrink-0 mx-0.5" />
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+                  <ApprovalFlowVisualizer
+                    steps={route.steps.map<FlowStepData>(s => ({
+                      stepOrder: s.step_order,
+                      name: s.name,
+                      positionName: s.position?.name,
+                      assigneeType: s.assignee_type,
+                      allowDynamicSelection: s.allow_dynamic_selection,
+                      approvalType: s.approval_type,
+                    }))}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -453,6 +459,69 @@ function RoutesPageInner() {
                   </div>
                 </SortableContext>
               </DndContext>
+            </div>
+
+            {/* Observers (view-only users) */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="flex items-center gap-1.5">
+                  閲覧者
+                  <span className="text-[10px] text-gray-400 font-normal">（承認権限なし・通知のみ）</span>
+                </Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setObservers(o => [...o, { employee_id: '', notify_on: 'approved' }])}
+                  disabled={observers.length >= employees.length}
+                >
+                  <Plus className="w-3 h-3 mr-1" />追加
+                </Button>
+              </div>
+              {observers.length === 0 ? (
+                <p className="text-[11px] text-gray-400 px-1">設定なし。「+ 追加」で関係部署のメンバー等を選んでください。</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {observers.map((obs, idx) => {
+                    const selectedIds = new Set(observers.filter((_, i) => i !== idx).map(o => o.employee_id))
+                    return (
+                      <div key={idx} className="flex items-center gap-2 p-2 border rounded-lg bg-gray-50/50">
+                        <Select
+                          value={obs.employee_id}
+                          onValueChange={v => setObservers(arr => arr.map((o, i) => i === idx ? { ...o, employee_id: v } : o))}
+                        >
+                          <SelectTrigger className="flex-1 h-8 text-xs"><SelectValue placeholder="社員を選択" /></SelectTrigger>
+                          <SelectContent>
+                            {employees
+                              .filter(e => !selectedIds.has(e.id) || e.id === obs.employee_id)
+                              .map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Select
+                          value={obs.notify_on}
+                          onValueChange={v => setObservers(arr => arr.map((o, i) => i === idx ? { ...o, notify_on: v as RouteObserver['notify_on'] } : o))}
+                        >
+                          <SelectTrigger className="w-36 h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="submit">提出時のみ</SelectItem>
+                            <SelectItem value="each_step">各ステップ進行時</SelectItem>
+                            <SelectItem value="approved">決裁完了時</SelectItem>
+                            <SelectItem value="rejected">差戻し時</SelectItem>
+                            <SelectItem value="all">全イベント</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setObservers(arr => arr.filter((_, i) => i !== idx))}
+                          className="h-8 w-8 p-0 text-red-400 hover:text-red-600"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           </div>
           <DialogFooter>

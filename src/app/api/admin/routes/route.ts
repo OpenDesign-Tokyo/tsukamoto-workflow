@@ -14,6 +14,10 @@ export async function GET(req: NextRequest) {
       steps:approval_route_steps(
         *,
         position:positions(*)
+      ),
+      observers:approval_route_observers(
+        id, notify_on, employee_id,
+        employee:employees(id, name, email)
       )
     `)
     .eq('is_active', true)
@@ -32,6 +36,27 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(data)
 }
+
+interface ObserverPayload { employee_id: string; notify_on?: string }
+
+async function replaceObservers(
+  supabase: ReturnType<typeof createAdminClient>,
+  routeId: string,
+  observers: ObserverPayload[],
+) {
+  await supabase.from('approval_route_observers').delete().eq('route_template_id', routeId)
+  if (!observers.length) return
+  const rows = observers
+    .filter(o => o.employee_id)
+    .map(o => ({
+      route_template_id: routeId,
+      employee_id: o.employee_id,
+      notify_on: o.notify_on || 'approved',
+    }))
+  if (rows.length) await supabase.from('approval_route_observers').insert(rows)
+}
+
+export { replaceObservers }
 
 export async function POST(req: NextRequest) {
   if (!(await requireAdmin(req))) return forbidden()
@@ -65,6 +90,10 @@ export async function POST(req: NextRequest) {
     }))
 
     await supabase.from('approval_route_steps').insert(steps)
+  }
+
+  if (Array.isArray(body.observers) && route) {
+    await replaceObservers(supabase, route.id, body.observers)
   }
 
   return NextResponse.json(route)
