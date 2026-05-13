@@ -50,11 +50,18 @@ export function TableField({ field, value, onChange, readOnly }: Props) {
         const allRows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][]
         if (!allRows.length) continue
 
-        // Find the header row by scanning for column label matches
+        // Find the header row by scanning for column label matches.
+        //
+        // Phase 1.1 で追加した「注文書」シート（業務帳票化）では、印鑑欄・
+        // 取引先ブロック・申請者メタ情報などが上部に入るため、テーブル
+        // ヘッダーが 13 行目あたりに来る。以前の 10 行制限ではヘッダーが
+        // 見つからずインポート失敗していたため、ヘッダー候補を 50 行まで
+        // 探すように拡張する。
         let headerIdx = -1
         let colMapping: { srcIdx: number; col: typeof editableColumns[number] }[] = []
+        const HEADER_SCAN_LIMIT = 50
 
-        for (let i = 0; i < Math.min(allRows.length, 10); i++) {
+        for (let i = 0; i < Math.min(allRows.length, HEADER_SCAN_LIMIT); i++) {
           const row = allRows[i] as (string | number | null)[]
           if (!row) continue
 
