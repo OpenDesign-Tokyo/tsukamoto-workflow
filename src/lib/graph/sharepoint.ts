@@ -50,6 +50,15 @@ export function isSharePointConfigured(): boolean {
 interface SiteCache {
   siteId: string
   driveId: string
+  /**
+   * 表示名 → 内部名のマップ。
+   *
+   * SharePointで日本語の列を作ると内部名は `_x7533__x8acb__x756a__x53f7_`
+   * のような URL エンコード形式になる。Graph API の listItem/fields PATCH
+   * は内部名を要求するため、ライブラリのカラム定義から実行時にマップを
+   * 構築し、メタデータ設定時に表示名を内部名へ変換する。
+   */
+  fieldMap: Map<string, string>
   fetchedAt: number
 }
 let siteCache: SiteCache | null = null
@@ -66,9 +75,9 @@ async function graphRequest(path: string, init?: RequestInit): Promise<Response>
   })
 }
 
-async function resolveSiteAndDrive(config: SharePointConfig): Promise<{ siteId: string; driveId: string }> {
+async function resolveSiteAndDrive(config: SharePointConfig): Promise<SiteCache> {
   if (siteCache && Date.now() - siteCache.fetchedAt < SITE_CACHE_TTL_MS) {
-    return { siteId: siteCache.siteId, driveId: siteCache.driveId }
+    return siteCache
   }
 
   const sitePath = encodeURIComponent(config.sitePath)
@@ -86,8 +95,26 @@ async function resolveSiteAndDrive(config: SharePointConfig): Promise<{ siteId: 
   }
   const drive = (await driveRes.json()) as { id: string }
 
-  siteCache = { siteId: site.id, driveId: drive.id, fetchedAt: Date.now() }
-  return { siteId: site.id, driveId: drive.id }
+  // 列の内部名マップを構築 (失敗してもアップロード自体は続行できるので非致命)
+  // ドライブに紐付くリストの列定義: /drives/{drive-id}/list/columns
+  const fieldMap = new Map<string, string>()
+  try {
+    const colsRes = await graphRequest(`/drives/${drive.id}/list/columns?$select=name,displayName`)
+    if (colsRes.ok) {
+      const cols = (await colsRes.json()) as { value: Array<{ name: string; displayName: string }> }
+      for (const c of cols.value) {
+        if (c.displayName && c.name) fieldMap.set(c.displayName, c.name)
+      }
+      console.log(`[SharePoint] 列マップ構築完了 (${fieldMap.size}件)`)
+    } else {
+      console.warn('[SharePoint] 列定義取得失敗:', colsRes.status, await colsRes.text())
+    }
+  } catch (e) {
+    console.warn('[SharePoint] 列定義取得エラー:', e)
+  }
+
+  siteCache = { siteId: site.id, driveId: drive.id, fieldMap, fetchedAt: Date.now() }
+  return siteCache
 }
 
 /** Test seam: clear in-memory site cache. Used by unit tests and force-refresh paths. */
@@ -136,7 +163,7 @@ export async function archivePdfToSharePoint(
   const config = getSharePointConfig()
   if (!config) throw new Error('SharePoint is not configured (SHAREPOINT_HOSTNAME / SHAREPOINT_SITE_PATH)')
 
-  const { driveId } = await resolveSiteAndDrive(config)
+  const { driveId, fieldMap } = await resolveSiteAndDrive(config)
 
   // Build the folder path under the drive root.
   const folderPathParts = [config.rootFolder, folderName].filter(Boolean)
@@ -179,11 +206,11 @@ export async function archivePdfToSharePoint(
   }
 
   // ── 2. Set list-item metadata fields ─────────────────────────────────────
-  // SharePoint internal field names default to display-name-with-special-chars stripped.
-  // We try the most-likely internal names and silently skip fields that aren't on
-  // the library yet (lets users add columns incrementally without breaking upload).
-  const fieldUpdates: Record<string, string> = {
-    Title: metadata.applicationNumber,
+  // Graph APIの listItem/fields PATCH は表示名ではなく「内部名」を要求する。
+  // 日本語列は内部的に URLエンコード形式 (例: _x7533__x8acb__x756a__x53f7_)
+  // になっているため、fieldMap で表示名から内部名へ変換する。
+  // fieldMap に無い列はライブラリに未追加とみなしスキップ (graceful degradation)。
+  const metadataByDisplayName: Record<string, string> = {
     申請番号: metadata.applicationNumber,
     申請者: metadata.applicantName,
     最終承認者: metadata.finalApproverName || '',
@@ -191,6 +218,22 @@ export async function archivePdfToSharePoint(
     申請日: metadata.submittedAt || '',
     承認完了日: metadata.approvedAt,
     書類種別: metadata.documentTypeName,
+  }
+  const fieldUpdates: Record<string, string> = {
+    // Title は SharePoint 標準列 (内部名 = 'Title' そのまま) なので変換不要
+    Title: metadata.applicationNumber,
+  }
+  const missingColumns: string[] = []
+  for (const [displayName, value] of Object.entries(metadataByDisplayName)) {
+    const internalName = fieldMap.get(displayName)
+    if (internalName) {
+      fieldUpdates[internalName] = value
+    } else {
+      missingColumns.push(displayName)
+    }
+  }
+  if (missingColumns.length > 0) {
+    console.warn(`[SharePoint] 未定義の列をスキップ: ${missingColumns.join(', ')}`)
   }
 
   const itemId = driveItem.id
