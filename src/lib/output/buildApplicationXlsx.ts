@@ -38,8 +38,26 @@ const BORDER = 'FFB0B8C0'
 const thin = { style: 'thin' as const, color: { argb: BORDER } }
 const boxBorder = { top: thin, left: thin, bottom: thin, right: thin }
 
-/** 会社印画像を探す（public/company-seal.png 優先、無ければ null）。 */
-function loadCompanySeal(): { buffer: Buffer; ext: 'png' | 'jpeg' } | null {
+/**
+ * 会社印画像を取得する（押印: 会社印1つ方式）。優先順:
+ *   1. COMPANY_SEAL_URL（再デプロイ不要でENV設定可能）
+ *   2. COMPANY_SEAL_PATH / public/company-seal.png|jpg
+ * 見つからなければ null（承認欄は空の印枠のまま）。
+ */
+async function loadCompanySeal(): Promise<{ buffer: Buffer; ext: 'png' | 'jpeg' } | null> {
+  const url = process.env.COMPANY_SEAL_URL
+  if (url) {
+    try {
+      const res = await fetch(url)
+      if (res.ok) {
+        const buf = Buffer.from(await res.arrayBuffer())
+        const ext = /\.jpe?g($|\?)/i.test(url) || res.headers.get('content-type')?.includes('jpeg') ? 'jpeg' : 'png'
+        return { buffer: buf, ext }
+      }
+    } catch {
+      /* fall through to file */
+    }
+  }
   const candidates = [
     process.env.COMPANY_SEAL_PATH,
     path.join(process.cwd(), 'public', 'company-seal.png'),
@@ -253,7 +271,7 @@ export async function buildApplicationXlsx(
   ws.getRow(sealRow).height = 42
 
   // 会社印を最初の承認枠に合成（押印: 会社印1つ方式）
-  const seal = loadCompanySeal()
+  const seal = await loadCompanySeal()
   if (seal && sealCols > 0) {
     const imageId = wb.addImage({ buffer: seal.buffer as unknown as ExcelJS.Buffer, extension: seal.ext })
     ws.addImage(imageId, {
