@@ -28,16 +28,20 @@ export interface SharePointConfig {
   hostname: string
   sitePath: string
   rootFolder: string
+  /** SHAREPOINT_AUTO_CREATE_FOLDERS=1 で、書類種別フォルダが無ければ自動作成する */
+  autoCreateFolders: boolean
 }
 
 export function getSharePointConfig(): SharePointConfig | null {
   const hostname = process.env.SHAREPOINT_HOSTNAME
   const sitePath = process.env.SHAREPOINT_SITE_PATH
   if (!hostname || !sitePath) return null
+  const auto = process.env.SHAREPOINT_AUTO_CREATE_FOLDERS
   return {
     hostname,
     sitePath,
     rootFolder: process.env.SHAREPOINT_ROOT_FOLDER || '',
+    autoCreateFolders: auto === '1' || auto === 'true',
   }
 }
 
@@ -154,6 +158,38 @@ export interface ArchiveResult {
  *                    name and the metadata `書類種別` field. Must match an
  *                    existing folder unless SHAREPOINT_AUTO_CREATE_FOLDERS=1.
  */
+/**
+ * ドライブルート配下に指定パスのフォルダを冪等に作成する。
+ * segment 単位で `children` に POST（conflictBehavior=fail、409=既存はスキップ）。
+ * SHAREPOINT_AUTO_CREATE_FOLDERS=1 のときのみ archivePdfToSharePoint から呼ばれる。
+ */
+async function ensureFolderPath(driveId: string, parts: string[]): Promise<void> {
+  let parentPath = ''
+  for (const seg of parts) {
+    const encodedParent = parentPath
+      ? parentPath.split('/').map(encodeURIComponent).join('/')
+      : ''
+    const childrenPath = encodedParent
+      ? `/drives/${driveId}/root:/${encodedParent}:/children`
+      : `/drives/${driveId}/root/children`
+    const res = await graphRequest(childrenPath, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: seg,
+        folder: {},
+        '@microsoft.graph.conflictBehavior': 'fail',
+      }),
+    })
+    // 409 = 既に存在（正常）。それ以外の失敗は警告のみ（後続アップロードで検知）。
+    if (!res.ok && res.status !== 409) {
+      const t = await res.text()
+      console.warn(`[SharePoint] フォルダ作成失敗 "${seg}" (${res.status}): ${t}`)
+    }
+    parentPath = parentPath ? `${parentPath}/${seg}` : seg
+  }
+}
+
 export async function archivePdfToSharePoint(
   pdfBytes: ArrayBuffer | Uint8Array | Buffer,
   fileName: string,
@@ -168,6 +204,11 @@ export async function archivePdfToSharePoint(
   // Build the folder path under the drive root.
   const folderPathParts = [config.rootFolder, folderName].filter(Boolean)
   const folderPath = folderPathParts.join('/')
+
+  // 書類種別フォルダを自動作成（有効時）。新規帳票でも初回申請から格納できる。
+  if (config.autoCreateFolders && folderPathParts.length > 0) {
+    await ensureFolderPath(driveId, folderPathParts)
+  }
   // Drive item path syntax: /drives/{drive-id}/root:/path/to/file:/content
   // We use encodeURIComponent on each segment so Japanese folder names work.
   const encodedFolderPath = folderPathParts.map(encodeURIComponent).join('/')
@@ -182,18 +223,26 @@ export async function archivePdfToSharePoint(
     ? pdfBytes
     : new Uint8Array(pdfBytes)
 
-  const uploadRes = await graphRequest(uploadPath, {
+  const doUpload = () => graphRequest(uploadPath, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/pdf' },
     body: bodyBytes as unknown as BodyInit,
   })
+
+  let uploadRes = await doUpload()
+
+  // フォルダ未作成による 404 は、自動作成が有効なら作成して1度だけ再試行する。
+  if (!uploadRes.ok && uploadRes.status === 404 && config.autoCreateFolders && folderPathParts.length > 0) {
+    await ensureFolderPath(driveId, folderPathParts)
+    uploadRes = await doUpload()
+  }
 
   if (!uploadRes.ok) {
     const text = await uploadRes.text()
     if (uploadRes.status === 404) {
       throw new Error(
         `SharePoint フォルダ "${folderPath}" が見つかりません。` +
-          `SharePoint側で書類種別名と同じフォルダを作成してください。 (${text})`,
+          `SharePoint側で書類種別名と同じフォルダを作成するか、SHAREPOINT_AUTO_CREATE_FOLDERS=1 を設定してください。 (${text})`,
       )
     }
     throw new Error(`SharePoint アップロード失敗 (${uploadRes.status}): ${text}`)
