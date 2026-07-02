@@ -8,6 +8,7 @@ import { FormRenderer } from '@/components/forms/FormRenderer'
 import { ApprovalTimeline } from '@/components/workflow/ApprovalTimeline'
 import { ApprovalActions } from '@/components/workflow/ApprovalActions'
 import { ApprovalFlowVisualizer, type FlowStepData, type FlowObserver } from '@/components/workflow/ApprovalFlowVisualizer'
+import { AttachmentsPanel } from '@/components/workflow/AttachmentsPanel'
 import { StatusBadge } from '@/components/workflow/StatusBadge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -348,6 +349,14 @@ export default function ApplicationDetailPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* 添付ファイル（途中編集: 申請中は生産担当等が差し替え可能） */}
+          <div className="mt-6">
+            <AttachmentsPanel
+              applicationId={id as string}
+              canEdit={application.status !== 'approved' && application.status !== 'archived' && application.status !== 'withdrawn'}
+            />
+          </div>
         </div>
 
         {/* Right sidebar */}

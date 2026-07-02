@@ -187,6 +187,58 @@ export async function convertOfficeToPdfViaGraph(
   return pdf
 }
 
+export interface UploadedAttachment {
+  webUrl: string
+  itemId: string
+  driveId: string
+}
+
+/**
+ * 申請の添付ファイルを SharePoint に格納する（途中編集: Office for the web で開くため）。
+ * 格納先: `_attachments/{申請番号}/{ファイル名}`。
+ * SharePoint 未設定時は null（呼び元は Supabase Storage 等にフォールバックする想定）。
+ */
+export async function uploadAttachmentToSharePoint(
+  bytes: ArrayBuffer | Uint8Array | Buffer,
+  fileName: string,
+  appNumber: string,
+): Promise<UploadedAttachment | null> {
+  const config = getSharePointConfig()
+  if (!config) return null
+  const { driveId } = await resolveSiteAndDrive(config)
+
+  const safeName = fileName.replace(/[\\/:*?"<>|]/g, '_')
+  const parts = ['_attachments', appNumber].filter(Boolean)
+  await ensureFolderPath(driveId, parts).catch(() => {})
+  const encodedPath = [...parts, safeName].map(encodeURIComponent).join('/')
+  const body = bytes instanceof Uint8Array || bytes instanceof Buffer ? bytes : new Uint8Array(bytes)
+
+  let res = await graphRequest(`/drives/${driveId}/root:/${encodedPath}:/content`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: body as unknown as BodyInit,
+  })
+  if (!res.ok && res.status === 404) {
+    await ensureFolderPath(driveId, parts)
+    res = await graphRequest(`/drives/${driveId}/root:/${encodedPath}:/content`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: body as unknown as BodyInit,
+    })
+  }
+  if (!res.ok) {
+    throw new Error(`添付アップロード失敗 (${res.status}): ${await res.text()}`)
+  }
+  const item = (await res.json()) as { id: string; webUrl: string }
+  return { webUrl: item.webUrl, itemId: item.id, driveId }
+}
+
+/** SharePoint のアイテムを削除する（添付削除用。失敗は例外）。 */
+export async function deleteSharePointItem(driveId: string, itemId: string): Promise<void> {
+  const res = await graphRequest(`/drives/${driveId}/items/${itemId}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`添付削除失敗 (${res.status}): ${await res.text()}`)
+  }
+}
+
 export interface ArchiveMetadata {
   /** 申請番号 (e.g. "APP-2026-0001") */
   applicationNumber: string

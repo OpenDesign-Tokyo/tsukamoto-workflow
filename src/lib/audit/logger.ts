@@ -24,6 +24,9 @@ export type AuditAction =
   | 'position.create'
   | 'position.update'
   | 'position.delete'
+  | 'attachment.upload'
+  | 'attachment.delete'
+  | 'attachment.edit_open'
 
 interface AuditLogEntry {
   actorId: string
