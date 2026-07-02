@@ -283,3 +283,219 @@ export async function buildApplicationXlsx(
   const buf = await wb.xlsx.writeBuffer()
   return Buffer.from(buf)
 }
+
+// ════════════════════════════════════════════════════════════════════════
+// ビジネス帳票様式（見積書・請求書・注文書・加工指図書）
+// 「渡している帳票通り」に近い、宛先/自社ブロック・明細表・合計・承認印の様式で出力。
+// ════════════════════════════════════════════════════════════════════════
+
+export interface BizDocConfig {
+  title: string
+  /** 宛先ブロックのラベルと表示するフィールド */
+  partyLabel: string
+  partyFields: string[]
+  /** 件名/案件名として大きく出すフィールド */
+  projectField?: string
+  intro: string
+  /** 明細テーブルのフィールドid（未指定ならschema内の最初のtable） */
+  tableId?: string
+  /** 消費税（小計/税/合計）を明示表示（請求書など） */
+  tax?: boolean
+}
+
+export const BIZ_DOCS: Record<string, BizDocConfig> = {
+  T02: { title: '御 見 積 書', partyLabel: '御見積先', partyFields: ['customer_name'], projectField: 'project_name', intro: '下記の通り御見積り申し上げます。', tableId: 'estimate_items' },
+  T13: { title: '請 求 書', partyLabel: '請求先', partyFields: ['billing_to'], projectField: 'subject', intro: '下記の通り御請求申し上げます。', tableId: 'billing_items', tax: true },
+  T08: { title: '注 文 書', partyLabel: '御注文先', partyFields: ['vendor_name'], projectField: 'project_name', intro: '下記の通り御注文申し上げます。', tableId: 'detail_table' },
+  T12: { title: '加 工 指 図 書', partyLabel: '加工先', partyFields: ['customer_name'], projectField: 'project_name', intro: '下記の通り加工を指図します。', tableId: 'processing_items' },
+}
+
+export function getBizDocConfig(code?: string | null): BizDocConfig | null {
+  if (!code) return null
+  return BIZ_DOCS[code] || null
+}
+
+export async function buildBusinessDocXlsx(
+  app: OutputApplicationData,
+  schema: FormSchema,
+  config: BizDocConfig,
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook()
+  wb.creator = 'Tsukamoto Workflow'
+  const ws = wb.addWorksheet('帳票', {
+    pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } },
+  })
+  ws.columns = [{ width: 22 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 14 }, { width: 16 }]
+  const LAST = 6
+  const fieldById = new Map(schema.fields.map(f => [f.id, f]))
+  let r = 1
+
+  // タイトル
+  ws.mergeCells(r, 1, r, LAST)
+  const t = ws.getCell(r, 1)
+  t.value = config.title
+  t.font = { size: 20, bold: true }
+  t.alignment = { horizontal: 'center', vertical: 'middle' }
+  ws.getRow(r).height = 34
+  r += 2
+
+  // 右: 発行日 / 申請番号 / 自社名   左: 宛先ブロック
+  const topRow = r
+  const submitted = (app.submitted_at || app.created_at || '').slice(0, 10)
+  ws.getCell(topRow, 5).value = '発行日'
+  ws.getCell(topRow, 5).font = { size: 9, bold: true }
+  ws.getCell(topRow, 6).value = submitted
+  ws.getCell(topRow, 6).font = { size: 9 }
+  ws.getCell(topRow + 1, 5).value = '番号'
+  ws.getCell(topRow + 1, 5).font = { size: 9, bold: true }
+  ws.getCell(topRow + 1, 6).value = app.application_number
+  ws.getCell(topRow + 1, 6).font = { size: 9 }
+  ws.mergeCells(topRow + 2, 5, topRow + 2, 6)
+  const selfCo = ws.getCell(topRow + 2, 5)
+  selfCo.value = '株式会社ツカモトコーポレーション'
+  selfCo.font = { size: 10, bold: true }
+  selfCo.alignment = { horizontal: 'right' }
+
+  // 宛先（左）
+  const partyName = config.partyFields.map(fid => app.form_data[fid]).filter(Boolean).join(' ') || ''
+  ws.mergeCells(topRow, 1, topRow, 4)
+  const pc = ws.getCell(topRow, 1)
+  pc.value = `${partyName}　御中`
+  pc.font = { size: 13, bold: true, underline: true }
+  ws.getCell(topRow + 1, 1).value = `（${config.partyLabel}）`
+  ws.getCell(topRow + 1, 1).font = { size: 8, color: { argb: 'FF888888' } }
+  r = topRow + 4
+
+  // 件名 / 案件名
+  if (config.projectField && fieldById.get(config.projectField)) {
+    const f = fieldById.get(config.projectField)!
+    ws.getCell(r, 1).value = `【${f.label}】`
+    ws.getCell(r, 1).font = { size: 10, bold: true }
+    ws.mergeCells(r, 2, r, LAST)
+    ws.getCell(r, 2).value = String(app.form_data[config.projectField] ?? '')
+    ws.getCell(r, 2).font = { size: 11, bold: true }
+    r += 1
+  }
+
+  // リード文
+  ws.mergeCells(r, 1, r, LAST)
+  ws.getCell(r, 1).value = config.intro
+  ws.getCell(r, 1).font = { size: 9 }
+  r += 2
+
+  // 明細テーブル
+  const tableField = (config.tableId && fieldById.get(config.tableId)) || schema.fields.find(f => f.type === 'table')
+  let amountColId: string | null = null
+  if (tableField && tableField.columns) {
+    const cols = tableField.columns
+    // 金額列（formula）を検出
+    amountColId = cols.find(c => c.type === 'formula')?.id || cols[cols.length - 1]?.id || null
+    const headRow = r
+    cols.forEach((c, i) => {
+      if (i >= LAST) return
+      const cell = ws.getCell(headRow, i + 1)
+      cell.value = c.label
+      cell.font = { size: 9, bold: true, color: { argb: 'FFFFFFFF' } }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+      cell.alignment = { horizontal: 'center', vertical: 'middle' }
+      cell.border = boxBorder
+    })
+    r += 1
+    const rows = (app.form_data[tableField.id] as Record<string, unknown>[]) || []
+    for (const row of rows) {
+      cols.forEach((c, i) => {
+        if (i >= LAST) return
+        const cell = ws.getCell(r, i + 1)
+        const v = row[c.id]
+        if (c.type === 'currency' || c.type === 'formula' || c.type === 'number') {
+          cell.value = typeof v === 'number' ? v : (v !== undefined && v !== '' ? Number(v) : null)
+          cell.numFmt = '#,##0'
+          cell.alignment = { horizontal: 'right' }
+        } else {
+          cell.value = v != null ? String(v) : ''
+        }
+        cell.font = { size: 9 }
+        cell.border = boxBorder
+      })
+      r += 1
+    }
+    // 空行を数行（体裁）
+    for (let k = rows.length; k < Math.max(3, rows.length); k++) {
+      cols.forEach((_, i) => { if (i < LAST) ws.getCell(r, i + 1).border = boxBorder })
+      r += 1
+    }
+  }
+
+  // 合計欄
+  const money = (v: unknown) => (typeof v === 'number' ? v : Number(v) || 0)
+  const putTotal = (label: string, value: number) => {
+    ws.getCell(r, LAST - 1).value = label
+    ws.getCell(r, LAST - 1).font = { size: 9, bold: true }
+    ws.getCell(r, LAST - 1).alignment = { horizontal: 'right' }
+    ws.getCell(r, LAST - 1).border = boxBorder
+    const vc = ws.getCell(r, LAST)
+    vc.value = value
+    vc.numFmt = '¥#,##0'
+    vc.font = { size: 10, bold: true }
+    vc.alignment = { horizontal: 'right' }
+    vc.border = boxBorder
+    r += 1
+  }
+  const totalVal = money(app.form_data['total_amount'])
+  if (config.tax) {
+    const sub = money(app.form_data['subtotal_amount']) || totalVal
+    const taxv = money(app.form_data['tax_amount']) || Math.floor(sub * 0.1)
+    putTotal('小計', sub)
+    putTotal('消費税(10%)', taxv)
+    putTotal('合計(税込)', money(app.form_data['total_amount']) || sub + taxv)
+  } else if (totalVal) {
+    putTotal('合計金額', totalVal)
+  }
+  r += 1
+
+  // その他項目（宛先/案件/明細/合計以外のスカラー）
+  const usedIds = new Set<string>([...config.partyFields, config.projectField || '', tableField?.id || '',
+    'total_amount', 'subtotal_amount', 'tax_amount'])
+  const extras = schema.fields.filter(f => !usedIds.has(f.id) && !['table', 'formula'].includes(f.type))
+  for (const f of extras) {
+    const v = app.form_data[f.id]
+    if (v === undefined || v === null || v === '') continue
+    ws.getCell(r, 1).value = f.label
+    ws.getCell(r, 1).font = { size: 9, bold: true }
+    ws.getCell(r, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: LIGHT } }
+    ws.getCell(r, 1).border = boxBorder
+    ws.mergeCells(r, 2, r, LAST)
+    ws.getCell(r, 2).value = fieldDisplay(f, v)
+    ws.getCell(r, 2).font = { size: 9 }
+    ws.getCell(r, 2).border = boxBorder
+    r += 1
+  }
+  r += 1
+
+  // 承認印欄
+  const approved = (app.approval_records || []).filter(a => a.action === 'approved')
+  const sealCols = Math.min(LAST, Math.max(1, approved.length || 1))
+  const labelRow = r, nameRow = r + 1, sealRow = r + 2
+  for (let i = 0; i < sealCols; i++) {
+    const c = i + 1
+    ws.getCell(labelRow, c).value = approved[i]?.step_name || '承認'
+    ws.getCell(labelRow, c).font = { size: 8, bold: true }
+    ws.getCell(labelRow, c).alignment = { horizontal: 'center' }
+    ws.getCell(labelRow, c).border = boxBorder
+    ws.getCell(nameRow, c).value = approved[i]?.approver?.name || ''
+    ws.getCell(nameRow, c).font = { size: 9 }
+    ws.getCell(nameRow, c).alignment = { horizontal: 'center' }
+    ws.getCell(nameRow, c).border = boxBorder
+    ws.getCell(sealRow, c).border = boxBorder
+  }
+  ws.getRow(sealRow).height = 44
+
+  const seal = await loadCompanySeal()
+  if (seal && sealCols > 0) {
+    const imageId = wb.addImage({ buffer: seal.buffer as unknown as ExcelJS.Buffer, extension: seal.ext })
+    ws.addImage(imageId, { tl: { col: sealCols - 1 + 0.15, row: sealRow - 1 + 0.1 } as ExcelJS.Anchor, ext: { width: 58, height: 58 } })
+  }
+
+  const buf = await wb.xlsx.writeBuffer()
+  return Buffer.from(buf)
+}

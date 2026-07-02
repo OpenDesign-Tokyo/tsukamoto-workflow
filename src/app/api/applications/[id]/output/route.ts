@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { buildApplicationXlsx } from '@/lib/output/buildApplicationXlsx'
+import { buildApplicationXlsx, buildBusinessDocXlsx, getBizDocConfig } from '@/lib/output/buildApplicationXlsx'
 import { convertOfficeToPdfViaGraph } from '@/lib/graph/sharepoint'
 import type { FormSchema } from '@/lib/types/database'
 
@@ -22,7 +22,7 @@ export async function GET(
     .select(`
       id, application_number, title, status, form_data, submitted_at, created_at, form_template_id,
       applicant:employees!applicant_id(name),
-      document_type:document_types(name),
+      document_type:document_types(name, code),
       approval_records(step_name, action, acted_at, approver:employees!approver_id(name))
     `)
     .eq('id', id)
@@ -42,23 +42,27 @@ export async function GET(
     return NextResponse.json({ error: 'フォームテンプレートが見つかりません' }, { status: 404 })
   }
 
-  const buffer = await buildApplicationXlsx(
-    {
-      title: app.title,
-      application_number: app.application_number,
-      applicant: app.applicant as unknown as { name: string } | null,
-      document_type: app.document_type as unknown as { name: string } | null,
-      submitted_at: app.submitted_at,
-      created_at: app.created_at,
-      status: app.status,
-      form_data: app.form_data as Record<string, unknown>,
-      approval_records: app.approval_records as unknown as Array<{
-        step_name: string
-        approver?: { name: string } | null
-        action: string
-        acted_at?: string | null
-      }>,
-    },
+  const dtInfo = app.document_type as unknown as { name: string; code?: string } | null
+  const bizConfig = getBizDocConfig(dtInfo?.code)
+  const appData = {
+    title: app.title,
+    application_number: app.application_number,
+    applicant: app.applicant as unknown as { name: string } | null,
+    document_type: dtInfo,
+    submitted_at: app.submitted_at,
+    created_at: app.created_at,
+    status: app.status,
+    form_data: app.form_data as Record<string, unknown>,
+    approval_records: app.approval_records as unknown as Array<{
+      step_name: string
+      approver?: { name: string } | null
+      action: string
+      acted_at?: string | null
+    }>,
+  }
+  const buffer = bizConfig
+    ? await buildBusinessDocXlsx(appData, tmpl.schema as FormSchema, bizConfig)
+    : await buildApplicationXlsx(appData,
     tmpl.schema as FormSchema,
   )
 
