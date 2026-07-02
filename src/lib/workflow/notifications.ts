@@ -1,5 +1,7 @@
 import { createAdminClient } from '@/lib/supabase/admin'
 import { sendTeamsNotification } from '@/lib/graph/client'
+import { resolveApprovers } from '@/lib/workflow/resolver'
+import type { ApprovalRouteStep } from '@/lib/types/database'
 
 interface NotificationParams {
   recipientId: string
@@ -115,10 +117,10 @@ export async function sendWorkflowNotification(params: NotificationParams) {
 async function notifyObservers(params: NotificationParams) {
   const supabase = createAdminClient()
 
-  // ルートテンプレートIDを取得
+  // ルートテンプレートIDと申請者を取得
   const { data: app } = await supabase
     .from('applications')
-    .select('route_template_id')
+    .select('route_template_id, applicant_id')
     .eq('id', params.applicationId)
     .maybeSingle()
   if (!app?.route_template_id) return
@@ -126,7 +128,7 @@ async function notifyObservers(params: NotificationParams) {
   const { data: rows } = await supabase
     .from('approval_route_observers')
     .select(`
-      employee_id, notify_on,
+      employee_id, notify_on, assignee_type, assignee_position_id,
       employee:employees(id, name, email, is_active)
     `)
     .eq('route_template_id', app.route_template_id)
@@ -142,17 +144,61 @@ async function notifyObservers(params: NotificationParams) {
   const matchingTriggers = triggerMap[params.type] || []
 
   type ObsRow = {
-    employee_id: string
+    employee_id: string | null
     notify_on: string
+    assignee_type: string | null
+    assignee_position_id: string | null
     employee?: { id: string; name: string; email: string; is_active: boolean } | null
   }
 
-  const observers = (rows as unknown as ObsRow[]).filter(o =>
-    o.employee &&
-    o.employee.is_active &&
-    matchingTriggers.includes(o.notify_on) &&
-    o.employee_id !== params.recipientId, // 同一人物への二重通知を避ける
-  )
+  // 申請者の主所属部署（相対役職の配信先を解決するのに使う）
+  let applicantDeptId: string | null = null
+  if (app.applicant_id) {
+    const { data: asg } = await supabase
+      .from('employee_assignments')
+      .select('department_id')
+      .eq('employee_id', app.applicant_id)
+      .eq('is_primary', true)
+      .eq('is_active', true)
+      .maybeSingle()
+    applicantDeptId = (asg?.department_id as string) || null
+  }
+
+  // 配信先を具体的な従業員IDに解決する。
+  //  - specific_employee: employee_id をそのまま使用
+  //  - position_in_(parent_)department 等: resolver で申請者所属から解決
+  const recipientIds = new Set<string>()
+  for (const o of rows as unknown as ObsRow[]) {
+    if (!matchingTriggers.includes(o.notify_on)) continue
+    if (o.employee_id) {
+      if (o.employee?.is_active) recipientIds.add(o.employee_id)
+      continue
+    }
+    // 相対役職の配信先
+    if (o.assignee_type && o.assignee_type !== 'specific_employee' && app.applicant_id && applicantDeptId) {
+      try {
+        const pseudoStep = {
+          assignee_type: o.assignee_type,
+          assignee_position_id: o.assignee_position_id,
+          assignee_employee_id: null,
+        } as unknown as ApprovalRouteStep
+        const resolved = await resolveApprovers(pseudoStep, app.applicant_id, applicantDeptId)
+        for (const r of resolved) recipientIds.add(r.employeeId)
+      } catch (e) {
+        console.error('[notifications] 相対配信先の解決失敗:', e)
+      }
+    }
+  }
+  recipientIds.delete(params.recipientId) // 同一人物への二重通知を避ける
+
+  // 解決済みの受信者情報を取得
+  const { data: recipientRows } = await supabase
+    .from('employees')
+    .select('id, name, email, is_active')
+    .in('id', Array.from(recipientIds))
+  const observers = (recipientRows || [])
+    .filter(e => e.is_active)
+    .map(e => ({ employee_id: e.id, employee: e }))
 
   for (const obs of observers) {
     if (!obs.employee) continue

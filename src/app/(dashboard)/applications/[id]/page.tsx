@@ -471,6 +471,8 @@ interface RawRecord {
 interface RawObserver {
   id: string
   notify_on: string
+  label?: string | null
+  assignee_type?: string | null
   employee?: {
     id: string
     name: string
@@ -525,15 +527,22 @@ function buildVisualizerSteps(application: any): FlowStepData[] {
 function buildVisualizerObservers(application: any): FlowObserver[] {
   const observers: RawObserver[] | undefined = application?.route_template?.observers
   if (!observers) return []
-  return observers
-    .filter(o => o.employee)
-    .map(o => {
-      const primary = o.employee!.assignments?.find(a => a.is_primary && a.is_active)
+  return observers.map(o => {
+    // 相対役職の配信先（特定従業員が未解決）は label（例:「所属部長」）で表示
+    if (!o.employee) {
       return {
         id: o.id,
-        name: o.employee!.name,
-        positionName: primary?.position?.name ?? null,
-        departmentName: primary?.department?.name ?? null,
+        name: (o as { label?: string }).label || '配信先',
+        positionName: null,
+        departmentName: '申請者の所属に応じて決定',
       }
-    })
+    }
+    const primary = o.employee.assignments?.find(a => a.is_primary && a.is_active)
+    return {
+      id: o.id,
+      name: o.employee.name,
+      positionName: primary?.position?.name ?? null,
+      departmentName: primary?.department?.name ?? null,
+    }
+  })
 }

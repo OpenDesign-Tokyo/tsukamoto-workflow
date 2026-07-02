@@ -29,7 +29,7 @@ export async function GET(
           position:positions(id, name)
         ),
         observers:approval_route_observers(
-          id, notify_on,
+          id, notify_on, label, assignee_type,
           employee:employees(id, name,
             assignments:employee_assignments!employee_id(
               is_primary, is_active,
