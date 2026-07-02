@@ -212,6 +212,17 @@ export default function ApplicationDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          {schema && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.open(`/api/applications/${id}/output`, '_blank')}
+              title="申請書様式に沿ったExcelを出力（客先・委託先への提出用）"
+            >
+              <Download className="w-4 h-4 mr-1" />
+              帳票出力
+            </Button>
+          )}
           {schema && application.status === 'approved' && (
             <>
               <Button
