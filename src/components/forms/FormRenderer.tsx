@@ -1,6 +1,9 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Upload, Download } from 'lucide-react'
+import { generateFormTemplate, parseFormTemplate } from '@/lib/utils/formTemplate'
 import { TextField } from './fields/TextField'
 import { NumberField } from './fields/NumberField'
 import { DateField } from './fields/DateField'
@@ -35,6 +38,67 @@ interface Props {
   onChange?: (data: Record<string, unknown>) => void
   readOnly?: boolean
   errors?: Record<string, string>
+  /** 条件書「取込」○ の帳票で、項目一括取込のツールバーを表示する */
+  enableTemplateImport?: boolean
+  /** テンプレDL/ファイル名に使う表示名 */
+  documentName?: string
+}
+
+/** 項目一括取込ツールバー（条件書「取込」対応） */
+function TemplateImportToolbar({
+  schema,
+  formData,
+  onChange,
+  documentName,
+}: {
+  schema: FormSchema
+  formData: Record<string, unknown>
+  onChange: (data: Record<string, unknown>) => void
+  documentName?: string
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  const download = async () => {
+    const buf = await generateFormTemplate(schema, formData, documentName || '申請テンプレート')
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${documentName || '申請'}_テンプレート.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const buf = await file.arrayBuffer()
+      const updates = await parseFormTemplate(buf, schema)
+      const n = Object.keys(updates).length
+      onChange({ ...formData, ...updates })
+      setMsg(n > 0 ? `${n}項目を取り込みました` : '取り込める項目がありませんでした')
+    } catch {
+      setMsg('取込に失敗しました（テンプレート形式をご確認ください）')
+    } finally {
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-md border bg-blue-50/50 px-3 py-2">
+      <span className="text-xs text-gray-600">テンプレートで一括入力:</span>
+      <Button type="button" variant="outline" size="sm" onClick={download}>
+        <Download className="w-3 h-3 mr-1" />テンプレDL
+      </Button>
+      <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
+        <Upload className="w-3 h-3 mr-1" />テンプレ取込
+      </Button>
+      <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={onFile} />
+      {msg && <span className="text-xs text-gray-500">{msg}</span>}
+    </div>
+  )
 }
 
 function evaluateFormula(formula: string, formData: Record<string, unknown>): number {
@@ -64,7 +128,8 @@ function evaluateFormula(formula: string, formData: Record<string, unknown>): nu
   }
 }
 
-export function FormRenderer({ schema, formData, onChange, readOnly = false, errors = {} }: Props) {
+export function FormRenderer({ schema, formData, onChange, readOnly = false, errors = {}, enableTemplateImport = false, documentName }: Props) {
+  const showImport = enableTemplateImport && !readOnly && !!onChange
   const fieldMap = useMemo(() => {
     const map = new Map<string, FormField>()
     schema.fields.forEach((f) => map.set(f.id, f))
@@ -192,6 +257,9 @@ export function FormRenderer({ schema, formData, onChange, readOnly = false, err
   if (schema.layout?.sections) {
     return (
       <div className="space-y-6">
+        {showImport && (
+          <TemplateImportToolbar schema={schema} formData={formData} onChange={onChange!} documentName={documentName} />
+        )}
         {schema.layout.sections.map((section) => (
           <Card key={section.title}>
             <CardHeader className="pb-3">
@@ -208,6 +276,9 @@ export function FormRenderer({ schema, formData, onChange, readOnly = false, err
 
   return (
     <div className="space-y-4">
+      {showImport && (
+        <TemplateImportToolbar schema={schema} formData={formData} onChange={onChange!} documentName={documentName} />
+      )}
       {schema.fields.map((field) => renderField(field.id))}
     </div>
   )

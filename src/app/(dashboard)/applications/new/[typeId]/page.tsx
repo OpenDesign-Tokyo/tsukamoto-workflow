@@ -386,6 +386,8 @@ export default function NewApplicationFormPage() {
         formData={formData}
         onChange={setFormData}
         errors={validationErrors}
+        enableTemplateImport={['T01', 'T03'].includes(docType.code)}
+        documentName={docType.name}
       />
 
       <div className="flex gap-3 justify-end sticky bottom-6 bg-white/80 backdrop-blur p-4 rounded-lg border shadow-sm">
