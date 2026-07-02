@@ -128,6 +128,65 @@ export function __resetSharePointCacheForTests() {
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
+/**
+ * xlsx/docx 等の Office ファイルを Graph 経由で PDF に変換する。
+ * Vercel では LibreOffice が使えないため、SharePoint ドライブに一時アップロードし
+ * `/content?format=pdf` で変換結果を取得、その後一時ファイルを削除する。
+ *
+ * SharePoint 未設定・変換失敗時は null を返す（呼び元は xlsx にフォールバック）。
+ */
+export async function convertOfficeToPdfViaGraph(
+  bytes: ArrayBuffer | Uint8Array | Buffer,
+  baseName: string,
+  ext: 'xlsx' | 'docx' = 'xlsx',
+): Promise<Buffer | null> {
+  const config = getSharePointConfig()
+  if (!config) return null
+
+  let driveId: string
+  try {
+    ;({ driveId } = await resolveSiteAndDrive(config))
+  } catch (e) {
+    console.warn('[SharePoint] PDF変換: ドライブ解決失敗', e)
+    return null
+  }
+
+  const safeBase = baseName.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80)
+  const tmpName = `_wf_pdf_tmp/${Date.now()}_${safeBase}.${ext}`
+  const encodedTmp = tmpName.split('/').map(encodeURIComponent).join('/')
+  const body = bytes instanceof Uint8Array || bytes instanceof Buffer ? bytes : new Uint8Array(bytes)
+
+  // 一時フォルダを用意（存在すれば409無視）
+  await ensureFolderPath(driveId, ['_wf_pdf_tmp']).catch(() => {})
+
+  // 1. 一時アップロード
+  const upRes = await graphRequest(`/drives/${driveId}/root:/${encodedTmp}:/content`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: body as unknown as BodyInit,
+  })
+  if (!upRes.ok) {
+    console.warn('[SharePoint] PDF変換: 一時アップロード失敗', upRes.status, await upRes.text())
+    return null
+  }
+  const item = (await upRes.json()) as { id: string }
+
+  // 2. PDF 変換取得（fetch は 302 を自動追従）
+  let pdf: Buffer | null = null
+  try {
+    const pdfRes = await graphRequest(`/drives/${driveId}/items/${item.id}/content?format=pdf`)
+    if (pdfRes.ok) {
+      pdf = Buffer.from(await pdfRes.arrayBuffer())
+    } else {
+      console.warn('[SharePoint] PDF変換失敗', pdfRes.status, await pdfRes.text())
+    }
+  } finally {
+    // 3. 一時ファイル削除（失敗は無視）
+    await graphRequest(`/drives/${driveId}/items/${item.id}`, { method: 'DELETE' }).catch(() => {})
+  }
+  return pdf
+}
+
 export interface ArchiveMetadata {
   /** 申請番号 (e.g. "APP-2026-0001") */
   applicationNumber: string

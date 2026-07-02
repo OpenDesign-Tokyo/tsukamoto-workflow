@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { buildApplicationXlsx } from '@/lib/output/buildApplicationXlsx'
+import { convertOfficeToPdfViaGraph } from '@/lib/graph/sharepoint'
 import type { FormSchema } from '@/lib/types/database'
 
 /**
- * 帳票出力（Excel）。条件書「出力」列 ○ の帳票を、渡された様式に沿って xlsx で出力する。
- * GET /api/applications/[id]/output  → xlsx ダウンロード
+ * 帳票出力。条件書「出力」列 ○ の帳票を、渡された様式に沿って出力する。
+ * GET /api/applications/[id]/output            → xlsx
+ * GET /api/applications/[id]/output?format=pdf → PDF（Graph変換。不可なら xlsx にフォールバック）
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
+  const wantPdf = req.nextUrl.searchParams.get('format') === 'pdf'
   const supabase = createAdminClient()
 
   const { data: app, error } = await supabase
@@ -60,13 +63,27 @@ export async function GET(
   )
 
   const docName = (app.document_type as unknown as { name: string } | null)?.name || '帳票'
-  const fileName = `${app.application_number}_${docName}.xlsx`.replace(/[\\/:*?"<>|]/g, '_')
+  const baseName = `${app.application_number}_${docName}`.replace(/[\\/:*?"<>|]/g, '_')
+
+  // PDF 希望時は Graph 変換。失敗/未設定なら xlsx にフォールバック（拡張子と内容を一致させる）。
+  if (wantPdf) {
+    const pdf = await convertOfficeToPdfViaGraph(buffer, baseName, 'xlsx')
+    if (pdf) {
+      return new NextResponse(new Uint8Array(pdf), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(baseName + '.pdf')}`,
+        },
+      })
+    }
+  }
 
   return new NextResponse(new Uint8Array(buffer), {
     status: 200,
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(baseName + '.xlsx')}`,
     },
   })
 }
