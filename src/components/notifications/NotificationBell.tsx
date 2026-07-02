@@ -49,7 +49,7 @@ export function NotificationBell() {
           </span>
         )}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-96 p-0">
+      <PopoverContent align="end" className="w-96 p-0 overflow-hidden bg-white">
         <NotificationPanel
           notifications={notifications}
           onRefresh={fetchNotifications}

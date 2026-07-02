@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { formatDateTime } from '@/lib/utils/format'
 import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { CheckCheck } from 'lucide-react'
 import type { Notification } from '@/lib/types/database'
@@ -45,15 +44,15 @@ export function NotificationPanel({ notifications, onRefresh }: Props) {
   }
 
   return (
-    <div>
-      <div className="flex items-center justify-between px-4 py-3 border-b">
+    <div className="bg-white rounded-md">
+      <div className="flex items-center justify-between px-4 py-3 border-b bg-white">
         <h3 className="font-semibold text-sm">通知</h3>
         <Button variant="ghost" size="sm" onClick={markAllRead} className="text-xs">
           <CheckCheck className="w-3 h-3 mr-1" />
           全て既読
         </Button>
       </div>
-      <ScrollArea className="max-h-96">
+      <div className="max-h-96 overflow-y-auto overscroll-contain bg-white">
         {notifications.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-8">通知はありません</p>
         ) : (
@@ -78,7 +77,7 @@ export function NotificationPanel({ notifications, onRefresh }: Props) {
             </Link>
           ))
         )}
-      </ScrollArea>
+      </div>
     </div>
   )
 }
